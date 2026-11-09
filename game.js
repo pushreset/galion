@@ -395,8 +395,8 @@ const statBars = (s) => [
 $('select-list').innerHTML = PREVIEW.map((s, i) =>
   `<div class="card"><kbd>${i + 1}</kbd><b>${s.name.toUpperCase()}</b><span class="blurb">${PLAYER_SHIPS[i].blurb}</span><div class="stats">${statBars(s)}</div>` +
   `<div class="kit">${s.skills.map((k) => `<img src="${ICON[k.id]}">${SKILLS[k.id].name}`).join('<br>')}</div></div>`).join('');
-function makePirate(s, pid) {
-  return Object.assign(s, { isPlayer: true, pid, tag: 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
+function makePirate(s, pid, pick) {
+  return Object.assign(s, { isPlayer: true, pid, pick, tag: 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
 }
 function hideSelect() {
   for (const s of PREVIEW) {
@@ -416,18 +416,18 @@ function choosePlayer(i) {
     hideSelect();
     return;
   }
-  me = makePirate(PREVIEW[i], 0);
+  me = makePirate(PREVIEW[i], 0, i);
   if (!ships.includes(me)) ships.push(me); // a host's previews wait outside the sim (hostGame)
   players.push(me);
   hideSelect();
   state.mode = 'between';
-  state.t = 0;
+  state.t = state.nextAt = 0; // nextAt: a PvP room already ran its merchant timer during the host's select
   banner(me.name.toUpperCase() + ' SETS SAIL', 2, true);
 }
 // a guest picked a ship: co-op drops them beside a crewmate, PvP somewhere safe
 function addPlayer(pid, i) {
   if (players.some((p) => p.pid === pid) || !PLAYER_SHIPS[i]) return;
-  const p = makePirate(makePlayer(i), pid);
+  const p = makePirate(makePlayer(i), pid, i);
   addShip(p.type, 'pirate', p.team, 0, 0, 0, 0, p);
   players.push(p);
   respawn(p, 1);
@@ -455,7 +455,11 @@ function hostStart() {
   if (state.mode === 'pvp' || !me) return;
   state.mode = 'pvp';
   state.left = 300;
-  for (const p of players) { p.kills = 0; respawn(p, 1); p.hp = p.maxHp; }
+  for (const p of players) { // every match starts from the stock ship: last match's refits don't carry over
+    Object.assign(p, makePlayer(p.pick), { team: p.team, kills: 0 });
+    setGuns(p.mesh, p.cannons);
+    respawn(p, 1);
+  }
   banner('FIRST TO 10 SINKINGS', 2.5);
   sfx.bell();
 }
@@ -463,8 +467,8 @@ function flow(dt) {
   state.t += dt;
   setCombat(state.mode === 'fight' || state.mode === 'pvp');
   if (state.banner > 0) state.banner -= dt;
+  if (mode === 'pvp') return pvpFlow(dt); // also while the host is still on ship select: guests are already duelling
   if (state.mode === 'select') return;
-  if (mode === 'pvp') return pvpFlow(dt);
   if (!players.some((p) => p.alive) && state.mode !== 'dead') {
     state.mode = 'dead';
     state.t = 0;

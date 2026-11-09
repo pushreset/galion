@@ -10,6 +10,7 @@ export const MAX_PLAYERS = 4;
 // WebRTC can take ages to notice a closed tab: guests ping every second, and either side
 // drops the link after TIMEOUT ms of silence (the host's snapshots are its heartbeat).
 const TIMEOUT = 8000;
+const BACKLOG = 65536; // bytes queued on a guest's channel (a dozen snapshots or more) before the host skips some
 
 // h: { open(code), join(id), msg(id, m), leave(id), error(e) }
 export function hostRoom(h) {
@@ -21,17 +22,23 @@ export function hostRoom(h) {
   setInterval(() => { for (const id of conns.keys()) if (performance.now() - seen.get(id) > TIMEOUT) drop(id); }, 1000);
   peer.on('open', () => h.open(code));
   peer.on('error', (e) => h.error(e));
+  // signalling socket lost (Wi-Fi blip, sleep): the game goes on over the data channels, but the code
+  // would stop working for late joiners. reconnect() re-registers the same id; retried every 3 s.
+  peer.on('disconnected', () => setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000));
   peer.on('connection', (c) => {
     if (conns.size >= MAX_PLAYERS - 1) { c.on('open', () => setTimeout(() => c.close(), 500)); return; }
     const id = next++;
-    c.on('open', () => { conns.set(id, c); seen.set(id, performance.now()); h.join(id); });
+    conns.set(id, c); seen.set(id, performance.now()); // seat taken now, not at open: overlapping joins can't pass the cap (never opens: TIMEOUT frees it)
+    c.on('open', () => { if (conns.get(id) !== c) return; seen.set(id, performance.now()); h.join(id); });
     c.on('data', (d) => { seen.set(id, performance.now()); const m = dec(d); if (m && m.t !== 'ping') h.msg(id, m); });
     c.on('close', () => drop(id));
   });
   return {
     code: () => code,
     send(id, m) { const c = conns.get(id); if (c?.open) c.send(enc(m)); },
-    broadcast(m) { const s = enc(m); for (const c of conns.values()) if (c.open) c.send(s); },
+    // snapshots only: a guest whose link can't keep up skips frames instead of queueing them and drifting
+    // into the past (the channel is reliable + ordered; state is absolute, so the next one corrects it)
+    broadcast(m) { const s = enc(m); for (const c of conns.values()) if (c.open && !(c.dataChannel?.bufferedAmount > BACKLOG)) c.send(s); },
   };
 }
 

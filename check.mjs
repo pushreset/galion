@@ -288,4 +288,19 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   for (const ball of fireBroadside(a, 1, r)) for (let i = 0; i < 400; i++) if (stepBall(ball, 1 / 60, [a, tgt])) break;
   assert.equal(tgt.lastHit, 10, 'no kill credit');
 }
+// net.js against a fake Peer: joins that overlap (all offers in before any channel opens) can't pass the cap
+{
+  const peers = [];
+  globalThis.Peer = class { h = {}; constructor() { peers.push(this); } on(e, f) { this.h[e] = f; } };
+  const si = globalThis.setInterval;
+  globalThis.setInterval = () => 0; // hostRoom's timeout sweep would keep node alive
+  const { hostRoom, MAX_PLAYERS } = await import('./net.js');
+  const joined = [];
+  hostRoom({ open() {}, join: (id) => joined.push(id), msg() {}, leave() {}, error() {} });
+  globalThis.setInterval = si;
+  const conns = Array.from({ length: 5 }, () => { const h = {}; return { h, open: true, on: (e, f) => (h[e] = f), close() {} }; });
+  for (const c of conns) peers[0].h.connection(c);
+  for (const c of conns) c.h.open();
+  assert.equal(joined.length, MAX_PLAYERS - 1, 'overlapping joins passed the player cap');
+}
 console.log('check ok');
