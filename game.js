@@ -346,8 +346,10 @@ function frame(now) {
 }
 // --- waves -------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
-function banner(text, dur = 2.5) {
-  $('banner').textContent = state.bannerText = text;
+// local: only on this screen (a host's own pick must not ride the snapshot to every guest)
+function banner(text, dur = 2.5, local = false) {
+  $('banner').textContent = text;
+  state.bannerText = local ? '' : text;
   state.banner = dur;
 }
 // A free spot 55-75 units from a random pirate (`but` excluded: the one respawning), ≥45 from all of them.
@@ -420,7 +422,7 @@ function choosePlayer(i) {
   hideSelect();
   state.mode = 'between';
   state.t = 0;
-  banner(me.name.toUpperCase() + ' SETS SAIL', 2);
+  banner(me.name.toUpperCase() + ' SETS SAIL', 2, true);
 }
 // a guest picked a ship: co-op drops them beside a crewmate, PvP somewhere safe
 function addPlayer(pid, i) {
@@ -444,7 +446,7 @@ function choose(p, i) {
   applyUpgrade(p, c.id);
   if (c.id === 'cannons') setGuns(p.mesh, p.cannons);
   p.cards = [];
-  if (p === me) { banner(c.label.toUpperCase(), 1.6); sfx.coin(); }
+  if (p === me) { banner(c.label.toUpperCase(), 1.6, true); sfx.coin(); }
 }
 const PICK_TIME = 22; // s since the lull began (cards show at 2.2)
 // host only, online: Enter sets sail for wave 1 (co-op) or starts / restarts the PvP match
@@ -497,7 +499,7 @@ function flow(dt) {
     state.mode = 'pick';
     for (const p of players) p.cards = rollUpgrades(p);
   }
-  if (state.mode === 'pick' && net !== 'solo' && state.t > PICK_TIME) for (const p of players) choose(p, 0); // online: an idle pirate gets the first card
+  if (state.mode === 'pick' && net !== 'solo' && state.t > PICK_TIME) for (const p of players) choose(p, Math.floor(Math.random() * p.cards.length)); // online: an idle pirate gets a random card
   if (state.mode === 'pick' && players.every((p) => !p.cards.length)) { state.mode = 'between'; state.t = 0; }
   if (state.mode === 'between' && state.t > 2.5 && (net === 'solo' || state.wave > 0 || state.go)) startWave(state.wave + 1);
 }
@@ -787,7 +789,7 @@ function pirateSunk(s) {
   const k = players.find((p) => p !== s && p.team === s.lastHit);
   if (!k) return banner(`${s.tag} SANK`, 2);
   if (state.mode === 'pvp') k.kills++; // warm-up and post-match sinkings don't score
-  const c = state.mode === 'pvp' && rollUpgrades(k)[0]; // each sinking refits the winner
+  const r = state.mode === 'pvp' ? rollUpgrades(k) : [], c = r[Math.floor(Math.random() * r.length)]; // each sinking refits the winner (random: slot 0 is always a skill card)
   if (c) { applyUpgrade(k, c.id); if (c.id === 'cannons') setGuns(k.mesh, k.cannons); popup(k.x, k.z, c.label.split(':')[0].toUpperCase()); }
   banner(`${k.tag} SANK ${s.tag}`, 2);
 }
@@ -819,7 +821,7 @@ function hud() {
   camera.updateMatrixWorld();
   const W = canvas.clientWidth, H = canvas.clientHeight;
   for (const s of fort ? [...ships, fort] : ships) {
-    if (s === me || (s.team === 0 && !s.isPlayer)) continue;
+    if (s === me || (s.team === 0 && !s.isPlayer)) { if (s.bar) s.bar.hidden = true; continue; } // a crewmate who left: no frozen bar
     if (!s.bar) {
       s.bar = document.createElement('div');
       s.bar.className = s.isPlayer ? (s.team === me.team ? 'ebar p' : 'ebar e') : s.merchant ? 'ebar m' : 'ebar';
@@ -1164,6 +1166,7 @@ function joinGame() {
     close: () => {
       if (!myPid) return offline('ROOM FULL OR CLOSED');
       banner('HOST LEFT', 3);
+      if (state.mode === 'dead') { state.t = Math.max(state.t, 3.1); return; } // run over: let the guest sign the leaderboard and reload themselves
       setTimeout(() => location.reload(), 3000);
     },
     error: (e) => { if (!myPid) offline(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : `CONNECTION FAILED (${e.type})`); },

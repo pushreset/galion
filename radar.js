@@ -80,7 +80,7 @@ export function createRadar(canvas) {
       const p = place(s.x, s.z);
       if (p.out) {
         // arrowhead on the ring, pointing outward
-        g.fillStyle = ally ? '#5f8f2e' : s.team === 2 ? '#c9952a' : '#a52623';
+        g.fillStyle = ally ? '#5f8f2e' : s.team === 2 ? '#c9952a' : s.isPlayer ? '#c2551a' : '#a52623';
         g.beginPath();
         g.moveTo(C + Math.cos(p.a) * (R + 4), C + Math.sin(p.a) * (R + 4));
         g.lineTo(C + Math.cos(p.a + 0.13) * (R - 3), C + Math.sin(p.a + 0.13) * (R - 3));
