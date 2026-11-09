@@ -203,7 +203,7 @@ export function collideShips(ships) {
         damage(a, closing * 1.2);
         damage(b, closing * 1.2);
         a.speed *= 0.4; b.speed *= 0.4;
-        rams.push({ x: a.x + nx * a.len * 0.3, z: a.z + nz * a.len * 0.3 });
+        rams.push({ x: a.x + nx * a.len * 0.3, z: a.z + nz * a.len * 0.3, a, b });
       }
     }
   }

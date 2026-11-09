@@ -21,7 +21,7 @@ Peer-to-peer, no server to run: on the ship select screen, one player clicks **H
 - **Co-op**: shared gold, bigger waves, each pirate picks their own refit cards; a sunk pirate comes back at the next break, the run ends when the whole crew is sunk.
 - **PvP**: first to 10 sinkings (or most after 5 min). Each sinking refits the winner; merchants keep coming as loot (their barrels patch your hull).
 - Online there's no pause and no boarding QTE: only ships under 20% hull (striking their colours) can be boarded.
-- The host's browser runs the game: keep that tab in front (background tabs get throttled and guests drop after 8 s).
+- The host's browser runs the game: keep that tab in front (a hidden tab stalls the game for everyone until the host comes back).
 
 ### How two distant PCs connect
 

@@ -153,7 +153,11 @@ const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '
 const held = new Set();
 const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC']);
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') { if (e.code === 'Enter') joinGame(); return; } // typing a room code
+  if (e.target.tagName === 'INPUT') { // typing a room code; Escape hands the keys back to the game
+    if (e.code === 'Enter') joinGame();
+    if (e.code !== 'Escape') return;
+    e.target.blur();
+  }
   // Without this, Firefox's find-as-you-type swallows letter keys and opens its search bar.
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.repeat) return;
@@ -427,6 +431,7 @@ function choosePlayer(i) {
 // a guest picked a ship: co-op drops them beside a crewmate, PvP somewhere safe
 function addPlayer(pid, i) {
   if (players.some((p) => p.pid === pid) || !PLAYER_SHIPS[i]) return;
+  if (state.mode === 'dead') return banner('THIS RUN IS OVER', 3); // no ship: a latecomer must not sign a score for it
   const p = makePirate(makePlayer(i), pid, i);
   addShip(p.type, 'pirate', p.team, 0, 0, 0, 0, p);
   players.push(p);
@@ -435,7 +440,8 @@ function addPlayer(pid, i) {
 }
 function respawn(p, hpFrac) {
   const a = mode === 'coop' && anyAlive(p);
-  const [x, z] = a ? [a.x - Math.sin(a.h) * 12, a.z + Math.cos(a.h) * 12] : spawnPoint(p);
+  const r = Math.random() * Math.PI * 2; // random bearing: two respawns beside the same crewmate never share a spot
+  const [x, z] = a ? [a.x + Math.cos(r) * 12, a.z + Math.sin(r) * 12] : spawnPoint(p);
   const h = a ? a.h : Math.atan2(-z, -x);
   Object.assign(p, { x, z, h, alive: true, hp: p.maxHp * hpFrac, sinkT: 0, speed: 0, sail: 0, turnIn: 0, turnRate: 0, burnT: 0, slowT: 0, calm: 0, wrecked: false, respawnAt: undefined });
   if (hpFrac === 1) p.crew = p.maxCrew; // PvP: a fresh ship, not a hull with no gunners
@@ -455,6 +461,8 @@ function hostStart() {
   if (state.mode === 'pvp' || !me) return;
   state.mode = 'pvp';
   state.left = 300;
+  for (const k of kegs) scene.remove(k.mesh); // nothing fired or dropped last match scores in this one
+  kegs.length = pending.length = flying.length = 0;
   for (const p of players) { // every match starts from the stock ship: last match's refits don't carry over
     Object.assign(p, makePlayer(p.pick), { team: p.team, kills: 0 });
     setGuns(p.mesh, p.cannons);
@@ -585,8 +593,9 @@ function updateKegs(dt) {
     if (ev === 'boom') {
       for (let j = 0; j < 3; j++) fx.hit(k.x + Math.random() * 2 - 1, 1, k.z + Math.random() * 2 - 1);
       fx.splash(k.x, k.z);
-      sfx.boom(...ear(k.x, k.z));
-      shake = Math.max(shake, 0.4);
+      const [v, pan] = ear(k.x, k.z);
+      sfx.boom(v, pan);
+      if (v > 0.6) shake = Math.max(shake, 0.4); // only blasts near our own ship
     }
     scene.remove(k.mesh);
     kegs.splice(i, 1);
@@ -694,7 +703,7 @@ function updateLoot(dt) {
     if (got || o.life <= 0) {
       if (got && mode === 'pvp') { P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.08); popup(o.x, o.z, '+HULL'); } // PvP: cargo patches your hull
       else if (got) { state.gold += o.value; popup(o.x, o.z, `+${o.value}`); }
-      if (got) { fx.splash(o.x, o.z); sfx.coin(); }
+      if (got) { fx.splash(o.x, o.z); if (P === me) sfx.coin(); }
       scene.remove(o.mesh);
       loot.splice(i, 1);
       continue;
@@ -766,7 +775,7 @@ function step(dt) {
     if (!s.alive && !s.wrecked) { s.wrecked = true; sfx.sink(...ear(s.x, s.z)); if (s.isPlayer) pirateSunk(s); else dropLoot(s, comboKill(s.x, s.z)); }
     // ponytail: every enemy wreck counts as the crew's kill (no killer tracking); navy never shoots merchants, so it holds
   }
-  for (const r of collideShips(ships)) { fx.hit(r.x, 1.5, r.z); sfx.hit(...ear(r.x, r.z)); shake = Math.max(shake, 0.25); }
+  for (const r of collideShips(ships)) { fx.hit(r.x, 1.5, r.z); sfx.hit(...ear(r.x, r.z)); if (r.a === me || r.b === me) shake = Math.max(shake, 0.25); }
   // sunk enemies leave the scene (pirate wrecks stay: they respawn)
   for (let i = ships.length - 1; i >= 0; i--) {
     const s = ships[i];
@@ -785,7 +794,7 @@ function step(dt) {
   wakes.update(dt);
   updateCamera(dt, false);
   hud();
-  if (net === 'host' && (snapT += dt) >= SNAP_DT) { snapT = 0; room.broadcast(snap()); }
+  if (net === 'host' && (snapT += dt) >= SNAP_DT) { snapT = 0; if (room.guests()) room.broadcast(snap()); else events.length = 0; } // nobody listening: no snapshot
 }
 function pirateSunk(s) {
   s.cards = [];
@@ -799,13 +808,14 @@ function pirateSunk(s) {
 }
 const radar = createRadar($('radar'));
 const _p = new THREE.Vector3();
+const setHTML = (el, h) => { if (el._h !== h) el.innerHTML = el._h = h; }; // per-frame text: touch the DOM only on change
 function hud() {
   $('banner').hidden = state.banner <= 0 || !!state.boarding;
   $('room').hidden = net === 'solo';
   if (net !== 'solo') {
     const n = players.length, wait = net === 'host' && (mode === 'coop' ? state.mode === 'between' && state.wave === 0 && !state.go : state.mode !== 'pvp');
-    $('room').innerHTML = (net === 'host' ? `ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${mode === 'pvp' ? 'PVP' : 'CO-OP'} · ${n} PIRATES`) +
-      (wait && me ? `<br><kbd>Enter</kbd> ${mode === 'pvp' ? (state.mode === 'over' ? 'rematch' : 'start the match') : 'set sail'}` : '');
+    setHTML($('room'), (net === 'host' ? `ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${mode === 'pvp' ? 'PVP' : 'CO-OP'} · ${n} PIRATES`) +
+      (wait && me ? `<br><kbd>Enter</kbd> ${mode === 'pvp' ? (state.mode === 'over' ? 'rematch' : 'start the match') : 'set sail'}` : ''));
   }
   if (!me) return;
   radar(me, ships, loot, fort && { x: fort.x, z: fort.z, active: (fortActive(state.wave) || mode === 'pvp') && fort.alive });
@@ -813,8 +823,8 @@ function hud() {
   $('pvp').hidden = mode !== 'pvp';
   if (mode === 'pvp') {
     const t = Math.max(0, Math.ceil(state.left));
-    $('pvp').innerHTML = [...players].sort((a, b) => b.kills - a.kills).map((p) => `${p === me ? '<b>' : ''}${p.tag} ${p.name.toUpperCase()} ${p.kills}${p === me ? '</b>' : ''}`).join('<br>') +
-      (state.mode === 'pvp' ? `<br>${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : '');
+    setHTML($('pvp'), [...players].sort((a, b) => b.kills - a.kills).map((p) => `${p === me ? '<b>' : ''}${p.tag} ${p.name.toUpperCase()} ${p.kills}${p === me ? '</b>' : ''}`).join('<br>') +
+      (state.mode === 'pvp' ? `<br>${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : ''));
   }
   $('gold').textContent = state.gold;
   $('wave').textContent = state.wave;
@@ -952,7 +962,7 @@ function capture(p, e, b) {
   e.wrecked = true; // plunder paid directly: no barrels on top
   damage(e, 1e9);
   sfx.sink(...ear(e.x, e.z));
-  sfx.coin();
+  if (p === me) sfx.coin();
   banner(`${e.merchant ? 'MERCHANT' : 'SHIP'} CAPTURED${b ? '' : ' · STRUCK HER COLOURS'}`, 2);
 }
 
@@ -1088,7 +1098,7 @@ function applySnap(m) {
   setCombat(state.mode === 'fight' || state.mode === 'pvp');
   // one-shot effects the host recorded; sounds are placed relative to this guest's ship
   for (const [k, ...a] of m.e) {
-    if (k === 'pop') { popup(...a); if (String(a[2]).startsWith('+')) sfx.coin(); continue; }
+    if (k === 'pop') { popup(...a); if (String(a[2]).startsWith('+') && nearestPlayer({ x: a[0], z: a[1] }) === me) sfx.coin(); continue; } // our own haul only
     fx[k](...a);
     const [v, pan] = ear(a[0], k === 'splash' ? a[1] : a[2]);
     if (k === 'muzzle') sfx.boom(v, pan); else if (k === 'hit') sfx.hit(v, pan); else sfx.splash(v * 0.7, pan);
@@ -1128,7 +1138,11 @@ function online() {
   lobbyLock(true);
   return true;
 }
-function offline(msg) { net = 'solo'; mode = 'coop'; room = null; myPid = 0; lobbyLock(false); lobbyMsg(msg); }
+function offline(msg) {
+  room?.close(); // or the abandoned Peer keeps calling back into the next attempt
+  for (const s of PREVIEW) if (!ships.includes(s)) ships.push(s); // hostGame took them out of the sim
+  net = 'solo'; mode = 'coop'; room = null; myPid = 0; lobbyLock(false); lobbyMsg(msg);
+}
 function hostGame(m) {
   if (!online()) return;
   net = 'host';
@@ -1168,7 +1182,7 @@ function joinGame() {
       else if (m.s && guestShip !== null) applySnap(m);
     },
     close: () => {
-      if (!myPid) return offline('ROOM FULL OR CLOSED');
+      if (!myPid) return offline('ROOM FULL, CLOSED OR UNREACHABLE');
       banner('HOST LEFT', 3);
       if (state.mode === 'dead') { state.t = Math.max(state.t, 3.1); return; } // run over: let the guest sign the leaderboard and reload themselves
       setTimeout(() => location.reload(), 3000);
