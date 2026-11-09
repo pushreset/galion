@@ -273,4 +273,19 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   assert.equal(rw.gold, 40);
   const q = makePlayer(0); applyUpgrade(q, 'crew'); assert.equal(q.maxCrew, 32);
 }
+
+// multiplayer: bigger co-op waves (still ≤ 8), boarding by team, kill credit
+{
+  const r = () => 0.5;
+  for (const k of [2, 5, 9]) {
+    assert.ok(waveSpec(k, r, 2.2).length >= waveSpec(k, r).length, 'co-op wave smaller than solo');
+    assert.ok(waveSpec(k, r, 2.2).length <= 8, 'co-op wave over cap');
+  }
+  const a = Object.assign(makePlayer(0, 0, 0, 0), { team: 10 }), b = Object.assign(makePlayer(1, 5, 0, 0), { team: 11, isPlayer: true });
+  assert.ok(!canBoard(a, b), 'boarded another player');
+  assert.ok(canBoard(a, makeShip('brig', 0, 5, 0, 0)), 'team 0 ship not boardable by team 10');
+  const tgt = makeShip('galleon', 11, 0, 26, 0);
+  for (const ball of fireBroadside(a, 1, r)) for (let i = 0; i < 400; i++) if (stepBall(ball, 1 / 60, [a, tgt])) break;
+  assert.equal(tgt.lastHit, 10, 'no kill credit');
+}
 console.log('check ok');

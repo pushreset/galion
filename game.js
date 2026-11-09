@@ -5,9 +5,10 @@ import { buildShip, setGuns } from './ships.js';
 import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
 import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
-// loudness + stereo pan of a world point relative to the player (screen-right = (dx - dz)/√2)
+import { hostRoom, joinRoom, MAX_PLAYERS } from './net.js';
+// loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
-  const p = player || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
+  const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
   return [Math.max(0, 1 - Math.hypot(dx, dz) / 110), (dx - dz) / Math.SQRT2 / 50];
 }
 import { createRadar } from './radar.js';
@@ -69,10 +70,24 @@ const world = createWorld(scene);
 const wakes = createWakes(scene);
 const fx = createFx(scene, wakes);
 
+// --- multiplayer -------------------------------------------------------------
+// net: 'solo' | 'host' (runs the sim, broadcasts snapshots) | 'guest' (sends input, renders snapshots).
+// mode: 'coop' (waves) | 'pvp' (arena). The host records one-shot effects (hits, splashes, muzzle
+// flashes, popups) as events for guests; everything else guests read from the snapshot itself.
+let net = 'solo', mode = 'coop', room = null, myPid = 0;
+const events = [];
+for (const k of ['hit', 'splash', 'muzzle']) {
+  const f = fx[k];
+  fx[k] = (...a) => { f(...a); if (net === 'host') events.push([k, ...a]); };
+}
+let nextId = 1;
+
 // ships: sim state + mesh
 const ships = [];
 function addShip(type, livery, team, x, z, h, sail = 0, s = makeShip(type, team, x, z, h)) {
   s.sail = sail;
+  s.id ??= nextId++;
+  s.livery = livery;
   s.mesh = buildShip(type, livery, s.cannons);
   s.seed = Math.random() * 10;
   s.wakeT = 0;
@@ -85,7 +100,19 @@ const PREVIEW = PLAYER_SHIPS.map((p, i) => {
   const x = (i - 1) * 16, z = -(i - 1) * 16, h = -Math.PI / 4; // along screen-right, bows to the right
   return addShip(p.type, 'pirate', 0, x, z, h, 0, makePlayer(i, x, z, h));
 });
-let player = null;
+const players = []; // every pirate ship (local + remote); the sim treats them all alike
+let me = null; // the ship this browser steers and looks at
+const localInput = () => ({ turn: (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0), fireL: held.has('KeyQ'), fireR: held.has('KeyE') });
+// enemies chase whichever pirate is closest (a sunk one only if nobody is left afloat)
+function nearestPlayer(o) {
+  let best = players[0], bd = Infinity;
+  for (const p of players) {
+    const d = Math.hypot(p.x - o.x, p.z - o.z);
+    if (p.alive && d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+const anyAlive = (but) => { const a = players.filter((p) => p.alive && p !== but); return a[Math.floor(Math.random() * a.length)]; };
 
 // fort cannons → turrets (positions from the meshes world.js built)
 scene.updateMatrixWorld(true);
@@ -97,13 +124,17 @@ const turrets = world.forts.flatMap((f) => f.cannons.map((c) => {
 const fortW = world.forts[0];
 const fort = fortW && makeFort(fortW.isl.x, fortW.isl.z, (4.2 * fortW.isl.r) / 13 + 1);
 const fortFlag = fortW?.group.children.find((o) => o.geometry?.type === 'CylinderGeometry' && o.geometry.parameters.radiusTop === 0.06);
+function fortShow(on) {
+  for (const t of turrets) t.mesh.visible = on;
+  if (fortFlag) fortFlag.visible = on;
+}
 function fortDown() {
   fort.backAt = state.wave + 3;
+  fort.upAt = time + 60; // PvP has no waves: rebuilt after a minute
   const gold = fort.gold * comboKill(fort.x, fort.z);
   state.gold += gold;
   popup(fort.x, fort.z, `+${gold}`);
-  for (const t of turrets) t.mesh.visible = false;
-  if (fortFlag) fortFlag.visible = false;
+  fortShow(false);
   for (let i = 0; i < 10; i++) fx.hit(fort.x + (Math.random() - 0.5) * fort.len, 5 + Math.random() * 2, fort.z + (Math.random() - 0.5) * fort.len);
   sfx.sink(...ear(fort.x, fort.z));
   sfx.boom(...ear(fort.x, fort.z));
@@ -112,21 +143,21 @@ function fortDown() {
 }
 function fortUp() {
   Object.assign(fort, { hp: fort.maxHp, alive: true });
-  for (const t of turrets) t.mesh.visible = true;
-  if (fortFlag) fortFlag.visible = true;
+  fortShow(true);
 }
 
 // game flow: fight → lull → pick (upgrade cards) → between → fight … | dead
-const state = { mode: 'select', wave: 0, gold: 0, t: 0, cards: [], banner: 0, repair: 0, queue: [], nextAt: 0, merchants: [] };
+const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0 };
 
 // input: physical key codes so AZERTY Z/Q/S/D and QWERTY W/A/S/D both work
 const held = new Set();
 const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC']);
 addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') { if (e.code === 'Enter') joinGame(); return; } // typing a room code
   // Without this, Firefox's find-as-you-type swallows letter keys and opens its search bar.
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.repeat) return;
-  if (e.code === 'Escape') return togglePause();
+  if (e.code === 'Escape') return net === 'solo' && togglePause(); // online: the world never stops
   if (paused) return; // before unlock(): it resumes the audio context
   if (state.entry !== undefined) { // SUNK screen: typing initials, nothing else reacts (no mute, no reload)
     e.preventDefault();
@@ -137,19 +168,35 @@ addEventListener('keydown', (e) => {
   }
   unlock();
   if (state.boarding) { if (e.code === 'Space') boardPress(); return; } // paused: Space is the only input
-  if (e.code === 'Space' && player?.alive && state.mode !== 'select' && state.mode !== 'pick') tryBoard();
   if (e.code === 'KeyC') overview = !overview; // same physical key on AZERTY
   if (e.key === 'm' || e.key === 'M') toggleMute(); // e.key: M sits on a different physical key in AZERTY
   held.add(e.code);
-  if (player && e.code === 'KeyW') player.sail = Math.min(3, player.sail + 1);
-  if (player && e.code === 'KeyS') player.sail = Math.max(0, player.sail - 1);
   // physical digit codes: AZERTY users don't need Shift
   const pick = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3 }[e.code];
-  if (state.mode === 'select' && pick < 3) choosePlayer(pick);
-  else if (state.mode === 'pick' && pick !== undefined) choose(pick);
-  else if (pick !== undefined && player) castSkill(pick); // fight / between waves: skills
-  if (state.mode === 'dead' && state.t > 3 && (e.code === 'Space' || e.code === 'Enter')) location.reload();
+  if (net === 'guest' ? guestShip === null : state.mode === 'select') {
+    if (pick < 3 && (net !== 'guest' || myPid)) choosePlayer(pick); // guest: only once the host said hi
+    return;
+  }
+  if ((state.mode === 'dead' && state.t > 3) && (e.code === 'Space' || e.code === 'Enter')) return location.reload();
+  if (e.code === 'Enter' && net === 'host') return hostStart();
+  const msg = e.code === 'Space' && state.mode !== 'pick' ? { t: 'board' }
+    : e.code === 'KeyW' ? { t: 'sail', d: 1 } : e.code === 'KeyS' ? { t: 'sail', d: -1 }
+    : pick !== undefined ? (me?.cards?.length ? { t: 'card', i: pick } : { t: 'skill', i: pick }) : null;
+  if (!msg) return;
+  if (net !== 'guest') { if (me) act(me, msg); return; }
+  room.send(msg);
+  // a guest hears its own clicks right away, not a round trip later
+  if (msg.t === 'card' && me.cards[pick]) { banner(me.cards[pick].label.toUpperCase(), 1.6); sfx.coin(); }
+  if (msg.t === 'skill') { const k = me?.alive && me.skills[pick]; if (k && !(me.cd[k.id] > 0)) sfx.hit(0.5, 0); }
 });
+// One player's action (local keys, or a guest's message on the host). Guest input is untrusted: clamp it.
+function act(p, m) {
+  if (m.t === 'in') p.input = { turn: Math.max(-1, Math.min(1, +m.turn || 0)), fireL: !!m.fireL, fireR: !!m.fireR };
+  else if (m.t === 'sail') p.sail = Math.max(0, Math.min(3, p.sail + Math.sign(+m.d || 0)));
+  else if (m.t === 'skill') castSkill(p, m.i | 0);
+  else if (m.t === 'board' && p.alive && state.mode !== 'select') tryBoard(p);
+  else if (m.t === 'card') choose(p, m.i | 0);
+}
 // cannonballs: pending (volley ripple delay) → flying
 const pending = [], flying = [];
 const ballMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.28, 0), new THREE.MeshLambertMaterial({ color: '#1c1e22', flatShading: true }), 256);
@@ -160,17 +207,18 @@ let shake = 0;
 function fire(s, side) {
   const balls = fireBroadside(s, side);
   pending.push(...balls);
-  if (balls.length && s === player) shake = Math.max(shake, 0.18);
+  if (balls.length && s === me) shake = Math.max(shake, 0.18);
 }
 // skills (sim.js useSkill): spawn what they return, plus sound/FX
-function castSkill(slot) {
-  const r = player.alive && useSkill(player, slot);
+function castSkill(p, slot) {
+  const r = p.alive && useSkill(p, slot);
   if (!r) return;
-  if (r.balls) { pending.push(...r.balls); shake = Math.max(shake, 0.35); }
+  if (r.balls) { pending.push(...r.balls); if (p === me) shake = Math.max(shake, 0.35); }
   if (r.keg) dropKeg(r.keg);
+  if (r.id === 'smoke') for (let i = 0; i < 25; i++) fx.cloud(p.x, p.z);
+  if (p !== me) return;
   if (r.id === 'boost') sfx.splash(1, 0);
   if (r.id === 'chain' || r.id === 'fire' || r.id === 'brace' || r.id === 'repair') sfx.hit(0.5, 0);
-  if (r.id === 'smoke') for (let i = 0; i < 25; i++) fx.cloud(player.x, player.z);
 }
 let paused = false;
 function togglePause() {
@@ -179,7 +227,7 @@ function togglePause() {
   $('pause').hidden = !paused;
   setPaused(paused);
 }
-addEventListener('blur', () => paused || togglePause()); // alt-tab mid-fight
+addEventListener('blur', () => net === 'solo' && !paused && togglePause()); // alt-tab mid-fight (solo only)
 
 addEventListener('keyup', (e) => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
@@ -210,7 +258,7 @@ resize();
 
 const camTarget = new THREE.Vector3();
 function updateCamera(dt, snapNow) {
-  const p = player || { x: 6, z: 6, h: 0, speed: 0 }; // select screen: aim below the row so ships sit above the cards
+  const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // select screen: aim below the row so ships sit above the cards
   const want = overview ? new THREE.Vector3() : new THREE.Vector3(p.x + Math.cos(p.h) * p.speed * 0.9, 0, p.z + Math.sin(p.h) * p.speed * 0.9);
   const wantH = overview ? VIEW_FAR : VIEW_H;
   if (viewH !== wantH) {
@@ -247,9 +295,9 @@ function syncShip(s, t, dt) {
     body.position.y -= s.sinkT * s.sinkT * 0.12;
     body.rotation.x += Math.min(0.5, s.sinkT * 0.12) * (s.seed > 5 ? 1 : -1);
     body.rotation.z -= Math.min(0.35, s.sinkT * 0.06);
-    root.getObjectByName('foam').visible = false;
     if (Math.random() < 0.5) fx.bubble(s.x, s.z);
   }
+  root.getObjectByName('foam').visible = s.alive; // back on when a co-op pirate respawns
   // fire on the deck once below half hull, or while fire shot burns
   if ((s.burnT > 0 || s.hp < s.maxHp * 0.5) && (s.alive || s.sinkT < 3) && Math.random() < (s.burnT > 0 ? 0.8 : 0.35 + 0.4 * (1 - s.hp / s.maxHp))) {
     _v.set((Math.random() - 0.5) * s.len * 0.7, 1.8, (Math.random() - 0.5) * s.beam * 0.6);
@@ -286,6 +334,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (hitstop > 0) hitstop -= dt;
+  else if (net === 'guest') guestStep(dt);
   else if (!paused) step(dt); // still render: the frozen scene stays under the overlay
   post.render(scene, camera);
   if (++frames === 2) window.__ready = true;
@@ -294,26 +343,28 @@ function frame(now) {
 // --- waves -------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 function banner(text, dur = 2.5) {
-  $('banner').textContent = text;
+  $('banner').textContent = state.bannerText = text;
   state.banner = dur;
 }
-function spawnPoint() {
+// A free spot 55-75 units from a random pirate (`but` excluded: the one respawning), ≥45 from all of them.
+function spawnPoint(but) {
+  const A = anyAlive(but) || { x: 0, z: 0 }, others = players.filter((p) => p.alive && p !== but);
   for (let i = 0; i < 80; i++) {
     const a = Math.random() * Math.PI * 2, r = 55 + Math.random() * 20, lim = ARENA - 12;
-    const x = Math.max(-lim, Math.min(lim, player.x + Math.cos(a) * r));
-    const z = Math.max(-lim, Math.min(lim, player.z + Math.sin(a) * r));
-    if (Math.hypot(x - player.x, z - player.z) < 45) continue;
+    const x = Math.max(-lim, Math.min(lim, A.x + Math.cos(a) * r));
+    const z = Math.max(-lim, Math.min(lim, A.z + Math.sin(a) * r));
+    if (others.some((p) => Math.hypot(x - p.x, z - p.z) < 45)) continue;
     if (ISLANDS.some((I) => Math.hypot(x - I.x, z - I.z) < I.r + 10)) continue;
-    if (ships.some((o) => Math.hypot(x - o.x, z - o.z) < 16)) continue;
+    if (ships.some((o) => o !== but && Math.hypot(x - o.x, z - o.z) < 16)) continue;
     return [x, z];
   }
-  return [player.x > 0 ? -ARENA + 15 : ARENA - 15, 0];
+  return [A.x > 0 ? -ARENA + 15 : ARENA - 15, 0];
 }
-// Merchant route: from a spawn point, past the player (±0.4 rad) to the far side of the arena.
+// Merchant route: from a spawn point, past a pirate (±0.4 rad) to the far side of the arena.
 function spawnMerchant(m) {
-  const [x, z] = spawnPoint(), lim = ARENA - 12;
-  const a = Math.atan2(player.z - z, player.x - x) + (Math.random() < 0.5 ? -0.4 : 0.4);
-  const r = Math.hypot(player.x - x, player.z - z) * 1.4 + 20;
+  const [x, z] = spawnPoint(), lim = ARENA - 12, P = anyAlive() || { x: 0, z: 0 };
+  const a = Math.atan2(P.z - z, P.x - x) + (Math.random() < 0.5 ? -0.4 : 0.4);
+  const r = Math.hypot(P.x - x, P.z - z) * 1.4 + 20;
   const dest = { x: Math.max(-lim, Math.min(lim, x + Math.cos(a) * r)), z: Math.max(-lim, Math.min(lim, z + Math.sin(a) * r)) };
   const h = Math.atan2(dest.z - z, dest.x - x);
   addShip(m.type, 'merchant', 2, x, z, h, 2, makeMerchant(m.type, x, z, h, m.armed, dest));
@@ -325,7 +376,7 @@ function startWave(k) {
   state.mode = 'fight';
   state.t = state.nextAt = 0;
   sfx.bell();
-  state.queue = waveSpec(k); // ships join one at a time (flow), never the whole wave at once
+  state.queue = waveSpec(k, Math.random, 1 + 0.6 * (players.length - 1)); // ships join one at a time (flow), never the whole wave at once
   state.merchants = merchantSpec(k).map((m, i) => ({ ...m, at: 5 + i * 15 }));
   const rebuilt = fort && !fort.alive && k >= fort.backAt;
   if (rebuilt) fortUp();
@@ -338,47 +389,82 @@ const statBars = (s) => [
 $('select-list').innerHTML = PREVIEW.map((s, i) =>
   `<div class="card"><kbd>${i + 1}</kbd><b>${s.name.toUpperCase()}</b><span class="blurb">${PLAYER_SHIPS[i].blurb}</span><div class="stats">${statBars(s)}</div>` +
   `<div class="kit">${s.skills.map((k) => `<img src="${ICON[k.id]}">${SKILLS[k.id].name}`).join('<br>')}</div></div>`).join('');
-function choosePlayer(i) {
-  player = PREVIEW[i];
+function makePirate(s, pid) {
+  return Object.assign(s, { isPlayer: true, pid, tag: 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
+}
+function hideSelect() {
   for (const s of PREVIEW) {
-    if (s === player) continue;
+    if (s === me) continue;
     scene.remove(s.mesh.root);
     ships.splice(ships.indexOf(s), 1);
   }
   $('select').hidden = true;
   document.body.classList.remove('selecting');
-  state.mode = 'between';
-  state.t = 0;
-  banner(player.name.toUpperCase() + ' SETS SAIL', 2);
 }
-function choose(i) {
-  const c = state.cards[i];
-  if (!c) return;
-  applyUpgrade(player, c.id);
-  if (c.id === 'cannons') setGuns(player.mesh, player.cannons);
-  $('cards').hidden = true;
+let guestShip = null;
+function choosePlayer(i) {
+  if (net === 'guest') { // the host builds our ship; snapshots bring it back
+    guestShip = i;
+    room.send({ t: 'ship', i });
+    me = null;
+    hideSelect();
+    return;
+  }
+  me = makePirate(PREVIEW[i], 0);
+  players.push(me);
+  hideSelect();
   state.mode = 'between';
   state.t = 0;
-  banner(c.label.toUpperCase(), 1.6);
-  sfx.coin();
+  banner(me.name.toUpperCase() + ' SETS SAIL', 2);
+}
+// a guest picked a ship: co-op drops them beside a crewmate, PvP somewhere safe
+function addPlayer(pid, i) {
+  if (players.some((p) => p.pid === pid) || !PLAYER_SHIPS[i]) return;
+  const p = makePirate(makePlayer(i), pid);
+  addShip(p.type, 'pirate', p.team, 0, 0, 0, 0, p);
+  players.push(p);
+  respawn(p, 1);
+  banner(`${p.tag} JOINS · ${p.name.toUpperCase()}`, 2);
+}
+function respawn(p, hpFrac) {
+  const a = mode === 'coop' && anyAlive(p);
+  const [x, z] = a ? [a.x - Math.sin(a.h) * 12, a.z + Math.cos(a.h) * 12] : spawnPoint(p);
+  const h = a ? a.h : Math.atan2(-z, -x);
+  Object.assign(p, { x, z, h, alive: true, hp: p.maxHp * hpFrac, sinkT: 0, speed: 0, sail: 0, turnIn: 0, turnRate: 0, burnT: 0, slowT: 0, calm: 0, wrecked: false, respawnAt: undefined });
+}
+function choose(p, i) {
+  const c = p.cards[i];
+  if (!c) return;
+  applyUpgrade(p, c.id);
+  if (c.id === 'cannons') setGuns(p.mesh, p.cannons);
+  p.cards = [];
+  if (p === me) { banner(c.label.toUpperCase(), 1.6); sfx.coin(); }
+}
+// host only, online: Enter sets sail for wave 1 (co-op) or starts / restarts the PvP match
+function hostStart() {
+  if (mode === 'coop') { if (state.mode === 'between' && state.wave === 0) state.go = true; return; }
+  if (state.mode === 'pvp' || !me) return;
+  state.mode = 'pvp';
+  state.left = 300;
+  for (const p of players) { p.kills = 0; respawn(p, 1); p.hp = p.maxHp; }
+  banner('FIRST TO 10 SINKINGS', 2.5);
+  sfx.bell();
 }
 function flow(dt) {
   state.t += dt;
-  setCombat(state.mode === 'fight');
+  setCombat(state.mode === 'fight' || state.mode === 'pvp');
   if (state.banner > 0) state.banner -= dt;
   if (state.mode === 'select') return;
-  if (!player.alive && state.mode !== 'dead') {
+  if (mode === 'pvp') return pvpFlow(dt);
+  if (!players.some((p) => p.alive) && state.mode !== 'dead') {
     state.mode = 'dead';
     state.t = 0;
-    $('cards').hidden = true;
+    for (const p of players) p.cards = [];
   }
-  if (state.mode === 'dead') {
-    if (state.t > 3 && $('over').hidden) { $('over').hidden = false; endRun(); }
-    return;
-  }
+  if (state.mode === 'dead') return gameOver();
   if (state.mode === 'fight' && state.queue.length && state.t >= state.nextAt) {
-    const [x, z] = spawnPoint();
-    addShip(state.queue.shift(), 'navy', 1, x, z, Math.atan2(player.z - z, player.x - x), 3);
+    const [x, z] = spawnPoint(), P = nearestPlayer({ x, z });
+    addShip(state.queue.shift(), 'navy', 1, x, z, Math.atan2(P.z - z, P.x - x), 3);
     state.nextAt += 7;
   }
   while (state.mode === 'fight' && state.merchants[0]?.at <= state.t) spawnMerchant(state.merchants.shift());
@@ -386,41 +472,67 @@ function flow(dt) {
     state.mode = 'lull';
     state.merchants = [];
     state.t = 0;
-    state.repair = player.maxHp * 0.6; // patch up to 60% of the hull per break, a bit each frame
-    player.crew = Math.min(player.maxCrew, player.crew + player.maxCrew * 0.3); // recruits between waves
+    for (const p of players) {
+      if (!p.alive) respawn(p, 0.5); // co-op: sunk crewmates are back for the break
+      p.repair = p.maxHp * 0.6; // patch up to 60% of the hull per break, a bit each frame
+      p.crew = Math.min(p.maxCrew, p.crew + p.maxCrew * 0.3); // recruits between waves
+    }
     banner('WAVE CLEARED · REPAIRS', 2);
     sfx.fanfare();
   }
-  const d = state.mode === 'fight' ? 0 : Math.min(state.repair, player.maxHp * 0.15 * dt, player.maxHp - player.hp);
-  player.hp += d;
-  state.repair -= d;
-  const healed = regenShip(player, dt);
-  $('hp').classList.toggle('fix', d + healed > 0);
+  for (const p of players) {
+    const d = state.mode === 'fight' || !p.alive ? 0 : Math.min(p.repair || 0, p.maxHp * 0.15 * dt, p.maxHp - p.hp);
+    p.hp += d;
+    p.repair -= d;
+    p.fix = d + regenShip(p, dt) > 0;
+  }
   if (state.mode === 'lull' && state.t > 2.2) {
     state.mode = 'pick';
-    state.cards = rollUpgrades(player);
-    $('cards-list').innerHTML = state.cards.map((c, i) => `<div class="card"><kbd>${i + 1}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${c.label}</span></div>`).join('');
-    $('cards').hidden = false;
+    for (const p of players) p.cards = rollUpgrades(p);
   }
-  if (state.mode === 'between' && state.t > 2.5) startWave(state.wave + 1);
+  if (state.mode === 'pick' && players.every((p) => !p.cards.length)) { state.mode = 'between'; state.t = 0; }
+  if (state.mode === 'between' && state.t > 2.5 && (net === 'solo' || state.wave > 0 || state.go)) startWave(state.wave + 1);
+}
+// PvP: 'between' (warm-up until the host presses Enter) → 'pvp' → 'over' (Enter: rematch)
+function pvpFlow(dt) {
+  for (const p of players) {
+    p.fix = regenShip(p, dt) > 0;
+    if (p.alive) continue;
+    p.respawnAt ??= time + 4;
+    if (time >= p.respawnAt) respawn(p, 1);
+  }
+  if (state.t >= state.nextAt) { // merchants keep coming: loot to fight over
+    state.nextAt = state.t + 25;
+    if (ships.filter((o) => o.merchant && o.alive && !o.escaped).length < 2) spawnMerchant(merchantSpec(4)[0]);
+  }
+  if (fort && !fort.alive && time >= fort.upAt) fortUp();
+  if (state.mode !== 'pvp') return;
+  state.left -= dt;
+  const top = [...players].sort((a, b) => b.kills - a.kills)[0];
+  if (state.left <= 0 || top?.kills >= 10) {
+    state.mode = 'over';
+    banner(`${top.tag} WINS · ${top.kills} SINKINGS`, 4);
+    sfx.fanfare();
+  }
 }
 
 // --- enemies + fort ---------------------------------------------------------
 function updateEnemies(dt) {
+  if (!players.length) return; // ship select: nobody to shoot at yet
   for (const s of ships) {
     if (s.team !== 1 || !s.alive) continue;
-    const side = aiSteer(s, player);
-    if (side && !(player.smokeT > 0)) fire(s, side); // smoke screen: they can't see you
+    const tgt = nearestPlayer(s), side = aiSteer(s, tgt);
+    if (side && !(tgt.smokeT > 0)) fire(s, side); // smoke screen: they can't see you
   }
   for (const s of ships) {
     if (s.team !== 2 || !s.alive || s.escaped) continue;
-    const r = merchantSteer(s, player, dt);
+    const r = merchantSteer(s, nearestPlayer(s), dt);
     if (r === 'escaped') { s.escaped = true; popup(s.x, s.z, 'ESCAPED'); }
     else if (r) fire(s, r);
   }
-  if (!fortActive(state.wave) || state.mode === 'dead' || !fort.alive) return;
+  if (!(fortActive(state.wave) || mode === 'pvp') || state.mode === 'dead' || !fort.alive) return;
   for (const t of turrets) {
-    const b = fireTurret(t, player, dt);
+    const b = fireTurret(t, nearestPlayer(t), dt);
     t.mesh.rotation.y = -t.aim;
     if (b) {
       b.x += b.ox * 1.3;
@@ -433,15 +545,20 @@ function updateEnemies(dt) {
 // --- powder kegs (skill): floating mines -------------------------------------
 const kegs = [];
 const kegBandMat = new THREE.MeshLambertMaterial({ color: '#a52623', flatShading: true });
-function dropKeg(k) {
+function kegMesh() {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(barrelGeo, bandMat));
   for (const y of [-0.3, 0.3]) { const b = new THREE.Mesh(bandGeo, kegBandMat); b.position.y = y; g.add(b); }
   g.traverse((o) => (o.castShadow = true));
-  k.mesh = g;
   scene.add(g);
+  return g;
+}
+function dropKeg(k) {
+  k.mesh = kegMesh();
+  k.id ??= nextId++;
   kegs.push(k);
-  sfx.splash(0.6, 0);
+  const [v, pan] = ear(k.x, k.z);
+  sfx.splash(v * 0.6, pan);
 }
 function updateKegs(dt) {
   for (let i = kegs.length - 1; i >= 0; i--) {
@@ -469,19 +586,24 @@ const goldMat = new THREE.MeshLambertMaterial({ color: '#ffd24a', emissive: '#c9
 function dropLoot(s, mult = 1) {
   const n = (s.merchant ? 4 : 1) + Math.floor(Math.random() * 3); // merchants spill their cargo
   for (let i = 0; i < n; i++) {
-    const g = new THREE.Group();
-    g.add(new THREE.Mesh(barrelGeo, barrelMat));
-    for (const y of [-0.3, 0.3]) { const b = new THREE.Mesh(bandGeo, goldMat); b.position.y = y; g.add(b); }
-    g.rotation.z = Math.PI / 2;
-    g.traverse((o) => (o.castShadow = true));
+    const g = barrelMesh();
     const a = Math.random() * 6.28;
-    const o = { x: s.x + Math.cos(a) * 2, z: s.z + Math.sin(a) * 2, vx: Math.cos(a) * 2, vz: Math.sin(a) * 2, life: 40, value: Math.ceil((s.gold * mult) / n), mesh: g, seed: Math.random() * 6 };
-    scene.add(g);
+    const o = { id: nextId++, x: s.x + Math.cos(a) * 2, z: s.z + Math.sin(a) * 2, vx: Math.cos(a) * 2, vz: Math.sin(a) * 2, life: 40, value: Math.ceil((s.gold * mult) / n), mesh: g, seed: Math.random() * 6 };
     loot.push(o);
   }
 }
+function barrelMesh() {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(barrelGeo, barrelMat));
+  for (const y of [-0.3, 0.3]) { const b = new THREE.Mesh(bandGeo, goldMat); b.position.y = y; g.add(b); }
+  g.rotation.z = Math.PI / 2;
+  g.traverse((o) => (o.castShadow = true));
+  scene.add(g);
+  return g;
+}
 // floating "+N" text at a world point (gold pickups)
 function popup(x, z, text, cls) {
+  if (net === 'host') events.push(['pop', x, z, text, cls]);
   _p.set(x, 3, z).project(camera);
   const el = document.createElement('div');
   el.className = cls ? 'pop ' + cls : 'pop';
@@ -504,7 +626,7 @@ function comboKill(x, z) {
     popup(x, z, `×${mult}`, 'combo');
     sfx.coin();
     shake = Math.max(shake, 0.2);
-    hitstop = 0.05 + 0.02 * mult;
+    if (net === 'solo') hitstop = 0.05 + 0.02 * mult; // online the world can't freeze
   }
   return mult;
 }
@@ -514,8 +636,12 @@ const better = (a, b) => b.wave - a.wave || b.gold - a.gold;
 function loadScores() { try { return JSON.parse(localStorage.getItem(LB_KEY)) || []; } catch { return []; } }
 function saveScores(list) { try { localStorage.setItem(LB_KEY, JSON.stringify(list)); } catch {} } // private window: the run just isn't kept
 let run = null;
+function gameOver() {
+  if (state.t > 3 && $('over').hidden) { $('over').hidden = false; endRun(); }
+}
 function endRun() {
-  run = { ini: '', wave: state.wave, gold: state.gold, ship: player.name, combo: combo.best, date: Date.now() };
+  const ship = players.length > 1 ? players.map((p) => p.name).join('+') : me.name; // online: the whole crew signs
+  run = { ini: '', wave: state.wave, gold: state.gold, ship, combo: combo.best, date: Date.now() };
   const list = loadScores();
   if (list.length < 10 || better(run, list[list.length - 1]) < 0) { state.entry = ''; showEntry(); }
   else showBoard(list, -1);
@@ -545,18 +671,23 @@ function updateLoot(dt) {
     o.vx *= 0.98; o.vz *= 0.98;
     o.x += (o.vx + 0.6) * dt; o.z += (o.vz + 0.45) * dt; // drift downwind
     // crew hauls in anything within 16 units, so sailing near the wreck is enough
-    const dx = player.x - o.x, dz = player.z - o.z, d = Math.hypot(dx, dz);
-    if (player.alive && d < 16) { o.x += (dx / d) * 12 * dt; o.z += (dz / d) * 12 * dt; }
-    const got = player.alive && d < player.len * 0.45 + 2;
+    const P = nearestPlayer(o), dx = P.x - o.x, dz = P.z - o.z, d = Math.hypot(dx, dz);
+    if (P.alive && d < 16) { o.x += (dx / d) * 12 * dt; o.z += (dz / d) * 12 * dt; }
+    const got = P.alive && d < P.len * 0.45 + 2;
     if (got || o.life <= 0) {
-      if (got) { state.gold += o.value; fx.splash(o.x, o.z); sfx.coin(); popup(o.x, o.z, `+${o.value}`); }
+      if (got && mode === 'pvp') { P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.08); popup(o.x, o.z, '+HULL'); } // PvP: cargo patches your hull
+      else if (got) { state.gold += o.value; popup(o.x, o.z, `+${o.value}`); }
+      if (got) { fx.splash(o.x, o.z); sfx.coin(); }
       scene.remove(o.mesh);
       loot.splice(i, 1);
       continue;
     }
-    o.mesh.position.set(o.x, Math.sin(time * 2.2 + o.seed) * 0.12 + 0.05 - Math.max(0, 2 - o.life) * 0.5, o.z);
-    o.mesh.rotation.y = o.seed + time * 0.3;
+    bobLoot(o);
   }
+}
+function bobLoot(o) {
+  o.mesh.position.set(o.x, Math.sin(time * 2.2 + o.seed) * 0.12 + 0.05 - Math.max(0, 2 - o.life) * 0.5, o.z);
+  o.mesh.rotation.y = o.seed + time * 0.3;
 }
 
 const _m = new THREE.Matrix4();
@@ -565,6 +696,7 @@ function updateBalls(dt) {
     const b = pending[i];
     if ((b.delay -= dt) > 0) continue;
     pending.splice(i, 1);
+    b.id = nextId++;
     fx.muzzle(b.x + b.ox * 0.6, b.y, b.z + b.oz * 0.6, b.ox, b.oz);
     sfx.boom(...ear(b.x, b.z));
     flying.push(b);
@@ -579,7 +711,7 @@ function updateBalls(dt) {
       fx.hit(b.x, ev.hit === fort ? 5.5 : Math.max(1, b.y), b.z);
       if (ev.hit === fort && !fort.alive) fortDown();
       sfx.hit(...ear(b.x, b.z));
-      if (ev.hit === player) shake = Math.max(shake, 0.3);
+      if (ev.hit === me) shake = Math.max(shake, 0.3);
     } else if (ev.land) {
       fx.hit(b.x, 1.5, b.z);
       const [v, pan] = ear(b.x, b.z);
@@ -590,6 +722,9 @@ function updateBalls(dt) {
       sfx.splash(v * 0.7, pan);
     }
   }
+  drawBalls();
+}
+function drawBalls() {
   ballMesh.count = Math.min(256, flying.length);
   for (let i = 0; i < ballMesh.count; i++) ballMesh.setMatrixAt(i, _m.makeTranslation(flying[i].x, flying[i].y, flying[i].z));
   ballMesh.instanceMatrix.needsUpdate = true;
@@ -598,10 +733,12 @@ function step(dt) {
   if (state.boarding) { updateBoarding(dt); hud(); return; } // boarding melee pauses the world
   time += dt;
   if (combo.t > 0 && (combo.t -= dt) <= 0) combo.n = 0;
-  if (player?.alive) {
-    player.turnIn = (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0);
-    if (held.has('KeyQ')) fire(player, -1); // AZERTY A: port (left)
-    if (held.has('KeyE')) fire(player, 1); // starboard (right)
+  if (me) me.input = localInput();
+  for (const p of players) {
+    if (!p.alive) continue;
+    p.turnIn = p.input.turn;
+    if (p.input.fireL) fire(p, -1); // AZERTY A: port (left)
+    if (p.input.fireR) fire(p, 1); // starboard (right)
   }
   flow(dt);
   updateEnemies(dt);
@@ -609,14 +746,14 @@ function step(dt) {
     stepShip(s, dt);
     syncShip(s, time, dt);
     // flag, not a before/after check: balls, rams and kegs sink ships outside this loop
-    if (!s.alive && !s.wrecked) { s.wrecked = true; sfx.sink(...ear(s.x, s.z)); if (s.team !== 0) dropLoot(s, comboKill(s.x, s.z)); }
-    // ponytail: every enemy wreck counts as the player's kill (no killer tracking); navy never shoots merchants, so it holds
+    if (!s.alive && !s.wrecked) { s.wrecked = true; sfx.sink(...ear(s.x, s.z)); if (s.isPlayer) pirateSunk(s); else dropLoot(s, comboKill(s.x, s.z)); }
+    // ponytail: every enemy wreck counts as the crew's kill (no killer tracking); navy never shoots merchants, so it holds
   }
   for (const r of collideShips(ships)) { fx.hit(r.x, 1.5, r.z); sfx.hit(...ear(r.x, r.z)); shake = Math.max(shake, 0.25); }
-  // sunk enemies leave the scene (player's wreck stays under the camera)
+  // sunk enemies leave the scene (pirate wrecks stay: they respawn)
   for (let i = ships.length - 1; i >= 0; i--) {
     const s = ships[i];
-    if (s === player || !(s.escaped || (!s.alive && s.sinkT >= 7))) continue; // sunk, or merchant got away
+    if (s.isPlayer || !(s.escaped || (!s.alive && s.sinkT >= 7))) continue; // sunk, or merchant got away
     scene.remove(s.mesh.root);
     s.bar?.remove();
     ships.splice(i, 1);
@@ -624,75 +761,110 @@ function step(dt) {
   updateLoot(dt);
   updateKegs(dt);
   if (fort && !fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len); // ruins smoulder
-  if (player?.smokeT > 0 && Math.random() < 0.5) fx.cloud(player.x, player.z);
+  for (const p of players) if (p.smokeT > 0 && Math.random() < 0.5) fx.cloud(p.x, p.z);
   updateBalls(dt);
   fx.update(dt);
   sea.uTime.value = time;
   wakes.update(dt);
   updateCamera(dt, false);
   hud();
+  if (net === 'host' && (snapT += dt) >= SNAP_DT) { snapT = 0; room.broadcast(snap()); }
+}
+function pirateSunk(s) {
+  s.cards = [];
+  if (mode !== 'pvp') { if (net !== 'solo') banner(`${s.tag} IS SUNK`, 2); return; }
+  const k = players.find((p) => p !== s && p.team === s.lastHit);
+  if (!k) return banner(`${s.tag} SANK`, 2);
+  k.kills++;
+  const c = state.mode === 'pvp' && rollUpgrades(k)[0]; // each sinking refits the winner
+  if (c) { applyUpgrade(k, c.id); if (c.id === 'cannons') setGuns(k.mesh, k.cannons); popup(k.x, k.z, c.label.split(':')[0].toUpperCase()); }
+  banner(`${k.tag} SANK ${s.tag}`, 2);
 }
 const radar = createRadar($('radar'));
 const _p = new THREE.Vector3();
 function hud() {
   $('banner').hidden = state.banner <= 0 || !!state.boarding;
-  if (!player) return;
-  radar(player, ships, loot, fort && { x: fort.x, z: fort.z, active: fortActive(state.wave) && fort.alive });
+  $('room').hidden = net === 'solo';
+  if (net !== 'solo') {
+    const n = players.length, wait = net === 'host' && (mode === 'coop' ? state.mode === 'between' && state.wave === 0 && !state.go : state.mode !== 'pvp');
+    $('room').innerHTML = (net === 'host' ? `ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${mode === 'pvp' ? 'PVP' : 'CO-OP'} · ${n} PIRATES`) +
+      (wait && me ? `<br><kbd>Enter</kbd> ${mode === 'pvp' ? (state.mode === 'over' ? 'rematch' : 'start the match') : 'set sail'}` : '');
+  }
+  if (!me) return;
+  radar(me, ships, loot, fort && { x: fort.x, z: fort.z, active: (fortActive(state.wave) || mode === 'pvp') && fort.alive });
+  $('coop').hidden = mode === 'pvp';
+  $('pvp').hidden = mode !== 'pvp';
+  if (mode === 'pvp') {
+    const t = Math.max(0, Math.ceil(state.left));
+    $('pvp').innerHTML = [...players].sort((a, b) => b.kills - a.kills).map((p) => `${p === me ? '<b>' : ''}${p.tag} ${p.name.toUpperCase()} ${p.kills}${p === me ? '</b>' : ''}`).join('<br>') +
+      (state.mode === 'pvp' ? `<br>${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : '');
+  }
   $('gold').textContent = state.gold;
   $('wave').textContent = state.wave;
   $('combo').hidden = combo.n < 2;
   $('combo-n').textContent = '×' + Math.min(combo.n, 5);
   $('combo-t').style.width = (combo.t / COMBO_WIN) * 100 + '%';
-  $('banner').hidden = state.banner <= 0 || !!state.boarding;
-  // enemy hull bars above the mast tops
+  // hull bars above the mast tops: damaged enemies, plus every other pirate (with their tag)
   camera.updateMatrixWorld();
   const W = canvas.clientWidth, H = canvas.clientHeight;
   for (const s of fort ? [...ships, fort] : ships) {
-    if (s.team === 0) continue;
+    if (s === me || (s.team === 0 && !s.isPlayer)) continue;
     if (!s.bar) {
       s.bar = document.createElement('div');
-      s.bar.className = s.merchant ? 'ebar m' : 'ebar';
+      s.bar.className = s.isPlayer ? (s.team === me.team ? 'ebar p' : 'ebar e') : s.merchant ? 'ebar m' : 'ebar';
+      s.bar.dataset.tag = s.tag || '';
       s.bar.innerHTML = '<i></i>';
       $('bars').append(s.bar);
     }
-    const show = s.alive && !s.escaped && s.hp < s.maxHp;
+    const show = s.alive && !s.escaped && (s.hp < s.maxHp || s.isPlayer);
     s.bar.hidden = !show;
     if (!show) continue;
     _p.set(s.x, s === fort ? 9 : s.len * 0.95, s.z).project(camera);
     s.bar.style.transform = `translate(${Math.round(((_p.x + 1) / 2) * W) - 24}px, ${Math.round(((1 - _p.y) / 2) * H) - 14}px)`;
     s.bar.firstChild.style.width = (s.hp / s.maxHp) * 100 + '%';
   }
-  $('sail').style.width = (player.sail / 3) * 100 + '%';
-  $('hp').style.width = (player.hp / player.maxHp) * 100 + '%';
-  const rt = player.reloadTime * crewMul(player);
-  $('rp').style.width = (1 - player.reload.port / rt) * 100 + '%';
-  $('rs').style.width = (1 - player.reload.star / rt) * 100 + '%';
-  $('crew').style.width = (player.crew / player.maxCrew) * 100 + '%';
-  $('crewn').textContent = `${Math.ceil(player.crew)}/${player.maxCrew}`;
+  $('sail').style.width = (me.sail / 3) * 100 + '%';
+  $('hp').style.width = (me.hp / me.maxHp) * 100 + '%';
+  $('hp').classList.toggle('fix', !!me.fix);
+  const rt = me.reloadTime * crewMul(me);
+  $('rp').style.width = (1 - me.reload.port / rt) * 100 + '%';
+  $('rs').style.width = (1 - me.reload.star / rt) * 100 + '%';
+  $('crew').style.width = (me.crew / me.maxCrew) * 100 + '%';
+  $('crewn').textContent = `${Math.ceil(me.crew)}/${me.maxCrew}`;
   // "Space: board" tag over the nearest ship close enough to grapple
-  const bt = player.alive && !state.boarding && state.mode !== 'pick' ? boardTarget() : null;
+  const bt = me.alive && !state.boarding && state.mode !== 'pick' ? boardTarget(me) : null;
   $('board-hint').hidden = !bt;
   if (bt) {
     _p.set(bt.x, bt.len * 0.95, bt.z).project(camera);
     $('board-hint').textContent = bt.hp < 0.2 * bt.maxHp ? 'SPACE · BOARD (AUTO)' : 'SPACE · BOARD';
     $('board-hint').style.transform = `translate(${Math.round(((_p.x + 1) / 2) * W)}px, ${Math.round(((1 - _p.y) / 2) * H) - 46}px) translateX(-50%)`;
   }
+  // refit cards: each pirate picks their own
+  const cards = me.cards || [], csig = cards.map((c) => c.id).join();
+  if (csig !== cardSig) {
+    cardSig = csig;
+    $('cards-list').innerHTML = cards.map((c, i) => `<div class="card"><kbd>${i + 1}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${c.label}</span></div>`).join('');
+  }
+  $('cards').hidden = !cards.length || state.mode === 'dead';
   skillHud();
 }
+let cardSig = '';
 // --- boarding (sim.js rules; here the timing-bar QTE, world paused) ---------------
-function boardTarget() {
+// Online there is no QTE (it pauses the world): only ships that strike their colours (< 20% hull) can be boarded.
+function boardTarget(p) {
   let best = null, bd = Infinity;
   for (const s of ships) {
-    const d = Math.hypot(s.x - player.x, s.z - player.z);
-    if (canBoard(player, s) && d < bd) { bd = d; best = s; }
+    const d = Math.hypot(s.x - p.x, s.z - p.z);
+    if (canBoard(p, s) && (net === 'solo' || s.hp < 0.2 * s.maxHp) && d < bd) { bd = d; best = s; }
   }
   return best;
 }
-function tryBoard() {
-  const e = boardTarget();
+function tryBoard(p) {
+  const e = boardTarget(p);
   if (!e) return;
-  const b = startBoarding(player, e);
-  if (b.auto) return capture(e, null);
+  const b = startBoarding(p, e);
+  if (b.auto) return capture(p, e, null);
+  if (net !== 'solo') return;
   state.boarding = { e, b, scale: Math.max(b.you, b.them), msg: 'GRAPPLES OUT!', result: null, endT: 0 };
   newRound();
   $('boarding').hidden = false;
@@ -743,23 +915,23 @@ function endBoarding() {
   const { e, b, result } = state.boarding;
   state.boarding = null;
   $('boarding').hidden = true;
-  player.crew = Math.max(1, b.you);
-  if (result === 'won') return capture(e, b);
+  me.crew = Math.max(1, b.you);
+  if (result === 'won') return capture(me, e, b);
   e.crew = Math.max(1, b.them);
-  player.boardCd = 6;
-  const dx = e.x - player.x, dz = e.z - player.z, d = Math.hypot(dx, dz) || 1;
+  me.boardCd = 6;
+  const dx = e.x - me.x, dz = e.z - me.z, d = Math.hypot(dx, dz) || 1;
   e.x += (dx / d) * 6; e.z += (dz / d) * 6; // cut loose
   banner('REPELLED', 1.5);
 }
-function capture(e, b) {
-  const r = captureReward(player, e, b);
+function capture(p, e, b) {
+  const r = captureReward(p, e, b);
   const gold = r.gold * comboKill(e.x, e.z);
   state.gold += gold;
-  player.crew += r.crew;
-  player.hp += r.heal;
-  player.boardCd = 2;
+  p.crew += r.crew;
+  p.hp += r.heal;
+  p.boardCd = 2;
   popup(e.x, e.z, `+${gold}`);
-  if (r.crew >= 1) popup(player.x, player.z, `+${r.crew} CREW`);
+  if (r.crew >= 1) popup(p.x, p.z, `+${r.crew} CREW`);
   e.wrecked = true; // plunder paid directly: no barrels on top
   damage(e, 1e9);
   sfx.sink(...ear(e.x, e.z));
@@ -770,26 +942,217 @@ function capture(e, b) {
 // skill bar: rebuilt when skills change (learn / level up), cooldown overlay + armed border every frame
 let skillSig = '';
 function skillHud() {
-  const sig = player.skills.map((k) => k.id + k.lvl).join();
+  const sig = me.skills.map((k) => k.id + k.lvl).join();
   if (sig !== skillSig) {
     skillSig = sig;
     $('skills').innerHTML = [0, 1, 2, 3].map((i) => {
-      const k = player.skills[i];
+      const k = me.skills[i];
       return k
         ? `<div class="slot"><img src="${ICON[k.id]}"><i class="cd"></i><kbd>${i + 1}</kbd><em>${'I'.repeat(k.lvl)}</em><span>${SKILLS[k.id].name}</span></div>`
         : `<div class="slot locked"><b>?</b><kbd>${i + 1}</kbd><span>locked</span></div>`;
     }).join('');
   }
-  player.skills.forEach((k, i) => {
+  me.skills.forEach((k, i) => {
     const el = $('skills').children[i];
-    el.querySelector('.cd').style.height = ((player.cd[k.id] || 0) / skillCd(k.id, k.lvl)) * 100 + '%';
-    el.classList.toggle('armed', player.ammo?.id === k.id);
+    el.querySelector('.cd').style.height = ((me.cd[k.id] || 0) / skillCd(k.id, k.lvl)) * 100 + '%';
+    el.classList.toggle('armed', me.ammo?.id === k.id);
   });
 }
+// --- online: host snapshots, guest rendering, lobby -----------------------------
+// Ships go as arrays in SF order (compact); pirates add a PF object with what the HUD needs.
+const SF = ['id', 'type', 'livery', 'team', 'x', 'z', 'h', 'speed', 'turnRate', 'sail', 'hp', 'maxHp', 'alive', 'sinkT', 'burnT', 'smokeT', 'cannons', 'escaped', 'pid', 'merchant'];
+const PF = ['pid', 'tag', 'name', 'reload', 'reloadTime', 'crew', 'maxCrew', 'skills', 'cd', 'ammo', 'boardCd', 'cards', 'kills', 'fix'];
+const SNAP_DT = 0.05; // 20 Hz
+let snapT = 0;
+function snap() {
+  return {
+    s: ships.map((o) => SF.map((k) => o[k] ?? null)),
+    p: players.map((o) => Object.fromEntries(PF.map((k) => [k, o[k]]))),
+    b: flying.map((b) => [b.id, b.x, b.y, b.z]),
+    l: loot.map((o) => [o.id, o.x, o.z, o.life]),
+    k: kegs.map((k) => [k.id, k.x, k.z]),
+    f: fort ? [fort.hp, fort.alive, turrets.map((t) => t.aim)] : null,
+    g: { mode: state.mode, wave: state.wave, gold: state.gold, t: state.t, left: state.left, banner: state.banner > 0 ? state.bannerText : '', bt: state.banner, combo: [combo.n, combo.t] },
+    e: events.splice(0),
+  };
+}
+
+// Guests draw one snapshot interval behind: each value glides from where it is drawn now (_a) to the latest snapshot (_b).
+const SK = ['x', 'z', 'h', 'speed', 'turnRate', 'sinkT'], BK = ['x', 'y', 'z'], LK = ['x', 'z', 'life'], KK = ['x', 'z'];
+let snapAt = 0, lastBanner = '', lastIn = '';
+const byId = new Map(), ballById = new Map(), lootById = new Map(), kegById = new Map();
+function track(o, keys, v, fresh) { o._a = fresh ? v : keys.map((k) => o[k]); o._b = v; }
+function mix(o, keys, a) {
+  keys.forEach((k, i) => {
+    const d = o._b[i] - o._a[i];
+    o[k] = o._a[i] + (k === 'h' ? Math.atan2(Math.sin(d), Math.cos(d)) : d) * a;
+  });
+}
+function syncList(list, map, rows, keys, make) {
+  const seen = new Set();
+  for (const [id, ...v] of rows) {
+    let o = map.get(id);
+    const fresh = !o;
+    if (fresh) { o = Object.assign(make(), { id }); map.set(id, o); list.push(o); }
+    track(o, keys, v.slice(0, keys.length), fresh);
+    if (fresh) mix(o, keys, 1);
+    seen.add(o);
+  }
+  for (let i = list.length - 1; i >= 0; i--) {
+    const o = list[i];
+    if (seen.has(o)) continue;
+    if (o.mesh) scene.remove(o.mesh);
+    map.delete(o.id);
+    list.splice(i, 1);
+  }
+}
+function applySnap(m) {
+  snapAt = performance.now();
+  const seen = new Set();
+  for (const row of m.s) {
+    const d = {};
+    SF.forEach((k, i) => (d[k] = row[i]));
+    let s = byId.get(d.id);
+    const fresh = !s;
+    if (fresh) {
+      s = addShip(d.type, d.livery, d.team, d.x, d.z, d.h, d.sail, Object.assign(makeShip(d.type, d.team, d.x, d.z, d.h), { id: d.id, cannons: d.cannons }));
+      byId.set(d.id, s);
+    } else {
+      if (s.alive && !d.alive) sfx.sink(...ear(d.x, d.z));
+      if (s.cannons !== d.cannons) setGuns(s.mesh, d.cannons);
+      if (s === me && d.hp < s.hp - 1) shake = Math.max(shake, 0.3);
+    }
+    track(s, SK, SK.map((k) => d[k]), fresh);
+    for (const k of SF) if (!SK.includes(k)) s[k] = d[k];
+    if (fresh) mix(s, SK, 1);
+    s.isPlayer = d.pid !== null;
+    seen.add(s);
+  }
+  for (let i = ships.length - 1; i >= 0; i--) {
+    const s = ships[i];
+    if (seen.has(s)) continue;
+    scene.remove(s.mesh.root);
+    s.bar?.remove();
+    byId.delete(s.id);
+    ships.splice(i, 1);
+  }
+  players.length = 0;
+  for (const e of m.p) { const s = ships.find((o) => o.pid === e.pid); if (s) players.push(Object.assign(s, e)); }
+  me = players.find((p) => p.pid === myPid) || null;
+  syncList(flying, ballById, m.b, BK, () => ({}));
+  syncList(loot, lootById, m.l, LK, () => ({ mesh: barrelMesh(), seed: Math.random() * 6 }));
+  syncList(kegs, kegById, m.k, KK, () => ({ mesh: kegMesh() }));
+  if (fort && m.f) {
+    const [hp, alive, aims] = m.f;
+    if (fort.alive !== alive) {
+      fortShow(alive);
+      if (!alive) { sfx.sink(...ear(fort.x, fort.z)); sfx.boom(...ear(fort.x, fort.z)); shake = Math.max(shake, 0.5); }
+    }
+    Object.assign(fort, { hp, alive });
+    aims.forEach((a, i) => turrets[i] && (turrets[i].mesh.rotation.y = -a));
+  }
+  const g = m.g, was = state.mode;
+  Object.assign(state, { mode: g.mode, wave: g.wave, gold: g.gold, t: g.t, left: g.left });
+  [combo.n, combo.t] = g.combo;
+  combo.best = Math.max(combo.best, combo.n);
+  if (g.banner && g.banner !== lastBanner) banner(g.banner, g.bt);
+  lastBanner = g.banner;
+  if (was !== state.mode && state.mode === 'fight') sfx.bell();
+  if (was !== state.mode && (state.mode === 'lull' || state.mode === 'over')) sfx.fanfare();
+  setCombat(state.mode === 'fight' || state.mode === 'pvp');
+  // one-shot effects the host recorded; sounds are placed relative to this guest's ship
+  for (const [k, ...a] of m.e) {
+    if (k === 'pop') { popup(...a); if (String(a[2]).startsWith('+')) sfx.coin(); continue; }
+    fx[k](...a);
+    const [v, pan] = ear(a[0], k === 'splash' ? a[1] : a[2]);
+    if (k === 'muzzle') sfx.boom(v, pan); else if (k === 'hit') sfx.hit(v, pan); else sfx.splash(v * 0.7, pan);
+  }
+}
+function guestStep(dt) {
+  time += dt;
+  if (state.banner > 0) state.banner -= dt;
+  if (guestShip !== null) {
+    const inp = localInput(), sig = JSON.stringify(inp);
+    if (sig !== lastIn) { lastIn = sig; room.send({ t: 'in', ...inp }); }
+  }
+  const a = Math.min(1, (performance.now() - snapAt) / (SNAP_DT * 1000));
+  for (const s of ships) { if (s._b) mix(s, SK, a); syncShip(s, time, dt); }
+  for (const b of flying) mix(b, BK, a);
+  drawBalls();
+  for (const o of loot) { mix(o, LK, a); bobLoot(o); }
+  for (const k of kegs) { mix(k, KK, a); k.mesh.position.set(k.x, 0.2 + Math.sin(time * 2 + k.id) * 0.1, k.z); }
+  if (fort && !fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len);
+  for (const p of players) if (p.smokeT > 0 && Math.random() < 0.5) fx.cloud(p.x, p.z);
+  if (state.mode === 'dead' && me) gameOver();
+  fx.update(dt);
+  sea.uTime.value = time;
+  wakes.update(dt);
+  updateCamera(dt, false);
+  hud();
+}
+
+const lobbyMsg = (t) => ($('lobby-msg').textContent = t);
+const lobbyLock = (on) => { for (const el of $('lobby').querySelectorAll('button, input')) el.disabled = on; };
+function online() {
+  if (net !== 'solo' || state.mode !== 'select') return false;
+  if (typeof Peer === 'undefined') { lobbyMsg('ONLINE UNAVAILABLE (PeerJS did not load)'); return false; }
+  lobbyLock(true);
+  return true;
+}
+function offline(msg) { net = 'solo'; room = null; myPid = 0; lobbyLock(false); lobbyMsg(msg); }
+function hostGame(m) {
+  if (!online()) return;
+  net = 'host';
+  mode = m;
+  lobbyMsg('OPENING ROOM…');
+  let open = false;
+  room = hostRoom({
+    open: (code) => { open = true; lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`); },
+    join: (pid) => room.send(pid, { t: 'hi', pid, mode }),
+    msg: (pid, msg) => {
+      if (msg.t === 'ship') return addPlayer(pid, msg.i | 0);
+      const p = players.find((o) => o.pid === pid);
+      if (p) act(p, msg);
+    },
+    leave: (pid) => {
+      const p = players.find((o) => o.pid === pid);
+      if (!p) return;
+      banner(`${p.tag} LEFT`, 2);
+      players.splice(players.indexOf(p), 1);
+      Object.assign(p, { wrecked: true, isPlayer: false, pid: null }); // their ship goes down and is cleared like any wreck
+      damage(p, 1e9);
+    },
+    error: (e) => { if (!open) offline(`COULD NOT OPEN A ROOM (${e.type})`); },
+  });
+}
+function joinGame() {
+  const code = $('code').value.trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(code)) return lobbyMsg('ENTER THE 4-LETTER ROOM CODE');
+  if (!online()) return;
+  net = 'guest';
+  lobbyMsg('CONNECTING…');
+  room = joinRoom(code, {
+    open: () => {},
+    msg: (m) => {
+      if (m.t === 'hi') { myPid = m.pid; mode = m.mode; lobbyMsg(`JOINED ${mode === 'pvp' ? 'PVP' : 'CO-OP'} · pick your ship: 1, 2 or 3`); }
+      else if (m.s && guestShip !== null) applySnap(m);
+    },
+    close: () => {
+      if (!myPid) return offline('ROOM FULL OR CLOSED');
+      banner('HOST LEFT', 3);
+      setTimeout(() => location.reload(), 3000);
+    },
+    error: (e) => { if (!myPid) offline(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : `CONNECTION FAILED (${e.type})`); },
+  });
+}
+$('host-coop').onclick = (e) => { e.currentTarget.blur(); hostGame('coop'); };
+$('host-pvp').onclick = (e) => { e.currentTarget.blur(); hostGame('pvp'); };
+$('join').onclick = (e) => { e.currentTarget.blur(); joinGame(); };
+
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
 window.__game = {
-  get player() { return player; }, ships, state, fire: (side) => fire(player, side), choose: choosePlayer, board: () => tryBoard(), press: () => boardPress(), cast: (i) => castSkill(i), kegs, fort, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
+  get player() { return me; }, players, ships, state, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, fort, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
   killWave: () => (state.queue = []) && ships.filter((o) => o.team === 1).forEach((o) => damage(o, 1e9)),
   startWave,
   advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); post.render(scene, camera); },

@@ -14,6 +14,15 @@ npx serve .        # or: python3 -m http.server
 
 Then open the printed URL. Three.js loads from jsDelivr, so there's no install step.
 
+## Online (2-4 players)
+
+Peer-to-peer, no server to run: on the ship select screen, one player clicks **HOST CO-OP** or **HOST PVP** and shares the 4-letter room code; the others type it and click **JOIN**, then everyone picks a ship. The host presses `Enter` to set sail (co-op) or start the match (PvP).
+
+- **Co-op**: shared gold, bigger waves, each pirate picks their own refit cards; a sunk pirate comes back at the next break, the run ends when the whole crew is sunk.
+- **PvP**: first to 10 sinkings (or most after 5 min). Each sinking refits the winner; merchants keep coming as loot (their barrels patch your hull).
+- Online there's no pause and no boarding QTE: only ships under 20% hull (striking their colours) can be boarded.
+- The host's browser runs the game: keep that tab in front (background tabs get throttled and guests drop after 8 s). Connections use the public PeerJS server and STUN; a few strict NATs may need a TURN server (`iceServers` in `net.js`).
+
 ## Controls
 
 Keys are physical positions, so AZERTY (ZQSD) and QWERTY (WASD) both work. AZERTY labels shown:
@@ -42,7 +51,8 @@ Keys are physical positions, so AZERTY (ZQSD) and QWERTY (WASD) both work. AZERT
 | File | Role |
 |---|---|
 | `sim.js` | Pure game simulation (no rendering) |
-| `game.js` | Main loop, input, HUD, game state |
+| `game.js` | Main loop, input, HUD, game state, online host snapshots / guest rendering |
+| `net.js` | P2P transport (PeerJS): rooms, messages, heartbeat |
 | `ships.js`, `world.js`, `water.js`, `fx.js` | Three.js scene: ships, islands, sea, effects |
 | `post.js`, `palette.js` | Pixel post-processing and palette |
 | `radar.js` | Compass / radar |

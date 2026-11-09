@@ -74,12 +74,13 @@ export function createRadar(canvas) {
       px(p.x, p.y, 4, fort.active ? '#a52623' : '#6f6f7c');
     }
     for (const s of ships) {
-      if (s.team === 0 || !s.alive || s.escaped) continue;
-      const col = s.team === 2 ? '#ffd24a' : '#d84a38'; // merchants gold, navy red
+      if (s === player || (s.team === 0 && !s.isPlayer) || !s.alive || s.escaped) continue;
+      const ally = s.isPlayer && s.team === player.team;
+      const col = ally ? '#94c54c' : s.team === 2 ? '#ffd24a' : s.isPlayer ? '#ff7a2a' : '#d84a38'; // crewmates green, merchants gold, rival pirates orange, navy red
       const p = place(s.x, s.z);
       if (p.out) {
         // arrowhead on the ring, pointing outward
-        g.fillStyle = s.team === 2 ? '#c9952a' : '#a52623';
+        g.fillStyle = ally ? '#5f8f2e' : s.team === 2 ? '#c9952a' : '#a52623';
         g.beginPath();
         g.moveTo(C + Math.cos(p.a) * (R + 4), C + Math.sin(p.a) * (R + 4));
         g.lineTo(C + Math.cos(p.a + 0.13) * (R - 3), C + Math.sin(p.a + 0.13) * (R - 3));
