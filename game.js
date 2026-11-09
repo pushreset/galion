@@ -227,7 +227,11 @@ function togglePause() {
   $('pause').hidden = !paused;
   setPaused(paused);
 }
-addEventListener('blur', () => net === 'solo' && !paused && togglePause()); // alt-tab mid-fight (solo only)
+addEventListener('blur', () => { // alt-tab: pause solo, release the keys online (their keyup goes to the other window)
+  if (net === 'solo') return !paused && togglePause();
+  held.clear();
+  if (net === 'guest' && guestShip !== null) sendInput(); // now: a hidden tab runs no frames
+});
 
 addEventListener('keyup', (e) => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
@@ -396,7 +400,7 @@ function hideSelect() {
   for (const s of PREVIEW) {
     if (s === me) continue;
     scene.remove(s.mesh.root);
-    ships.splice(ships.indexOf(s), 1);
+    if (ships.includes(s)) ships.splice(ships.indexOf(s), 1);
   }
   $('select').hidden = true;
   document.body.classList.remove('selecting');
@@ -411,6 +415,7 @@ function choosePlayer(i) {
     return;
   }
   me = makePirate(PREVIEW[i], 0);
+  if (!ships.includes(me)) ships.push(me); // a host's previews wait outside the sim (hostGame)
   players.push(me);
   hideSelect();
   state.mode = 'between';
@@ -431,6 +436,7 @@ function respawn(p, hpFrac) {
   const [x, z] = a ? [a.x - Math.sin(a.h) * 12, a.z + Math.cos(a.h) * 12] : spawnPoint(p);
   const h = a ? a.h : Math.atan2(-z, -x);
   Object.assign(p, { x, z, h, alive: true, hp: p.maxHp * hpFrac, sinkT: 0, speed: 0, sail: 0, turnIn: 0, turnRate: 0, burnT: 0, slowT: 0, calm: 0, wrecked: false, respawnAt: undefined });
+  if (hpFrac === 1) p.crew = p.maxCrew; // PvP: a fresh ship, not a hull with no gunners
 }
 function choose(p, i) {
   const c = p.cards[i];
@@ -440,6 +446,7 @@ function choose(p, i) {
   p.cards = [];
   if (p === me) { banner(c.label.toUpperCase(), 1.6); sfx.coin(); }
 }
+const PICK_TIME = 22; // s since the lull began (cards show at 2.2)
 // host only, online: Enter sets sail for wave 1 (co-op) or starts / restarts the PvP match
 function hostStart() {
   if (mode === 'coop') { if (state.mode === 'between' && state.wave === 0) state.go = true; return; }
@@ -490,6 +497,7 @@ function flow(dt) {
     state.mode = 'pick';
     for (const p of players) p.cards = rollUpgrades(p);
   }
+  if (state.mode === 'pick' && net !== 'solo' && state.t > PICK_TIME) for (const p of players) choose(p, 0); // online: an idle pirate gets the first card
   if (state.mode === 'pick' && players.every((p) => !p.cards.length)) { state.mode = 'between'; state.t = 0; }
   if (state.mode === 'between' && state.t > 2.5 && (net === 'solo' || state.wave > 0 || state.go)) startWave(state.wave + 1);
 }
@@ -508,8 +516,11 @@ function pvpFlow(dt) {
   if (fort && !fort.alive && time >= fort.upAt) fortUp();
   if (state.mode !== 'pvp') return;
   state.left -= dt;
-  const top = [...players].sort((a, b) => b.kills - a.kills)[0];
-  if (state.left <= 0 || top?.kills >= 10) {
+  const [top, second] = [...players].sort((a, b) => b.kills - a.kills);
+  if (!top) return;
+  const tie = top.kills === second?.kills;
+  if (tie && state.left <= 0 && state.left + dt > 0) banner('SUDDEN DEATH · NEXT SINKING WINS', 3);
+  if ((state.left <= 0 || top.kills >= 10) && !tie) {
     state.mode = 'over';
     banner(`${top.tag} WINS · ${top.kills} SINKINGS`, 4);
     sfx.fanfare();
@@ -671,7 +682,7 @@ function updateLoot(dt) {
     o.vx *= 0.98; o.vz *= 0.98;
     o.x += (o.vx + 0.6) * dt; o.z += (o.vz + 0.45) * dt; // drift downwind
     // crew hauls in anything within 16 units, so sailing near the wreck is enough
-    const P = nearestPlayer(o), dx = P.x - o.x, dz = P.z - o.z, d = Math.hypot(dx, dz);
+    const P = nearestPlayer(o) || { x: 0, z: 0 }, dx = P.x - o.x, dz = P.z - o.z, d = Math.hypot(dx, dz);
     if (P.alive && d < 16) { o.x += (dx / d) * 12 * dt; o.z += (dz / d) * 12 * dt; }
     const got = P.alive && d < P.len * 0.45 + 2;
     if (got || o.life <= 0) {
@@ -775,7 +786,7 @@ function pirateSunk(s) {
   if (mode !== 'pvp') { if (net !== 'solo') banner(`${s.tag} IS SUNK`, 2); return; }
   const k = players.find((p) => p !== s && p.team === s.lastHit);
   if (!k) return banner(`${s.tag} SANK`, 2);
-  k.kills++;
+  if (state.mode === 'pvp') k.kills++; // warm-up and post-match sinkings don't score
   const c = state.mode === 'pvp' && rollUpgrades(k)[0]; // each sinking refits the winner
   if (c) { applyUpgrade(k, c.id); if (c.id === 'cannons') setGuns(k.mesh, k.cannons); popup(k.x, k.z, c.label.split(':')[0].toUpperCase()); }
   banner(`${k.tag} SANK ${s.tag}`, 2);
@@ -1006,6 +1017,7 @@ function syncList(list, map, rows, keys, make) {
     list.splice(i, 1);
   }
 }
+const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 function applySnap(m) {
   snapAt = performance.now();
   const seen = new Set();
@@ -1037,7 +1049,15 @@ function applySnap(m) {
     ships.splice(i, 1);
   }
   players.length = 0;
-  for (const e of m.p) { const s = ships.find((o) => o.pid === e.pid); if (s) players.push(Object.assign(s, e)); }
+  for (const e of m.p) {
+    const s = ships.find((o) => o.pid === e.pid);
+    if (!s) continue;
+    // host strings end up in innerHTML (scoreboard, cards, leaderboard): a guest never trusts them
+    Object.assign(e, { tag: 'P' + ((e.pid | 0) + 1), name: esc(e.name), kills: +e.kills || 0,
+      cards: (e.cards || []).map((c) => ({ id: String(c.id), label: esc(c.label) })),
+      skills: (e.skills || []).filter((k) => SKILLS[k.id]).map((k) => ({ ...k, lvl: Math.min(9, k.lvl | 0) })) });
+    players.push(Object.assign(s, e));
+  }
   me = players.find((p) => p.pid === myPid) || null;
   syncList(flying, ballById, m.b, BK, () => ({}));
   syncList(loot, lootById, m.l, LK, () => ({ mesh: barrelMesh(), seed: Math.random() * 6 }));
@@ -1052,7 +1072,7 @@ function applySnap(m) {
     aims.forEach((a, i) => turrets[i] && (turrets[i].mesh.rotation.y = -a));
   }
   const g = m.g, was = state.mode;
-  Object.assign(state, { mode: g.mode, wave: g.wave, gold: g.gold, t: g.t, left: g.left });
+  Object.assign(state, { mode: g.mode, wave: +g.wave || 0, gold: +g.gold || 0, t: g.t, left: g.left });
   [combo.n, combo.t] = g.combo;
   combo.best = Math.max(combo.best, combo.n);
   if (g.banner && g.banner !== lastBanner) banner(g.banner, g.bt);
@@ -1068,13 +1088,14 @@ function applySnap(m) {
     if (k === 'muzzle') sfx.boom(v, pan); else if (k === 'hit') sfx.hit(v, pan); else sfx.splash(v * 0.7, pan);
   }
 }
+function sendInput() {
+  const inp = localInput(), sig = JSON.stringify(inp);
+  if (sig !== lastIn) { lastIn = sig; room.send({ t: 'in', ...inp }); }
+}
 function guestStep(dt) {
   time += dt;
   if (state.banner > 0) state.banner -= dt;
-  if (guestShip !== null) {
-    const inp = localInput(), sig = JSON.stringify(inp);
-    if (sig !== lastIn) { lastIn = sig; room.send({ t: 'in', ...inp }); }
-  }
+  if (guestShip !== null) sendInput();
   const a = Math.min(1, (performance.now() - snapAt) / (SNAP_DT * 1000));
   for (const s of ships) { if (s._b) mix(s, SK, a); syncShip(s, time, dt); }
   for (const b of flying) mix(b, BK, a);
@@ -1096,14 +1117,17 @@ const lobbyLock = (on) => { for (const el of $('lobby').querySelectorAll('button
 function online() {
   if (net !== 'solo' || state.mode !== 'select') return false;
   if (typeof Peer === 'undefined') { lobbyMsg('ONLINE UNAVAILABLE (PeerJS did not load)'); return false; }
+  if (paused) togglePause(); // paused on ship select (alt-tab for the code): online there is no Esc to clear it
+  document.activeElement?.blur(); // a focused input, once disabled, keeps eating the keys (Firefox)
   lobbyLock(true);
   return true;
 }
-function offline(msg) { net = 'solo'; room = null; myPid = 0; lobbyLock(false); lobbyMsg(msg); }
+function offline(msg) { net = 'solo'; mode = 'coop'; room = null; myPid = 0; lobbyLock(false); lobbyMsg(msg); }
 function hostGame(m) {
   if (!online()) return;
   net = 'host';
   mode = m;
+  for (const s of PREVIEW) if (ships.includes(s)) ships.splice(ships.indexOf(s), 1); // still on screen, but no target for guests until one is picked
   lobbyMsg('OPENING ROOM…');
   let open = false;
   room = hostRoom({
