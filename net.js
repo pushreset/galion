@@ -1,7 +1,8 @@
 // P2P transport over PeerJS (global `Peer`, loaded from the CDN in index.html).
 // The host's peer id is the room: guests connect with the 4-letter code. Messages are JSON
 // strings with numbers rounded to 0.01 (snapshots stay small).
-// ponytail: public PeerJS signalling server + default STUN; add a TURN server to iceServers if some NATs can't connect.
+// ponytail: PeerJS defaults: public signalling server, Google STUN and free community TURN relays (no SLA);
+// pass our own iceServers to new Peer() if the relays ever get unreliable.
 const PREFIX = 'broadside-';
 const enc = (m) => JSON.stringify(m, (k, v) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v));
 const dec = (d) => { try { return JSON.parse(d); } catch { return null; } };
