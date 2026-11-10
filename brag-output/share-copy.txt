@@ -1,0 +1,1 @@
+Broadside: pixel-art pirate battles in your browser. Unload full broadsides, board what you don't sink and raid convoys port to port, solo or with up to 3 friends from a 4-letter room code. Free, no install: https://pushreset.github.io/galion/

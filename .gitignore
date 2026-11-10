@@ -1,2 +1,5 @@
 .DS_Store
 node_modules/
+
+# /brag-slim intermediates (frames, stems, site copy, capture scripts)
+brag-output/work/
