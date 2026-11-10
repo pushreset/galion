@@ -174,7 +174,7 @@ const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '
 
 // input: physical key codes so AZERTY Z/Q/S/D and QWERTY W/A/S/D both work
 const held = new Set();
-const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC']);
+const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC', 'KeyP']);
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') { // typing a room code (letters only): Escape and the ship digits go back to the game
     if (e.code === 'Enter' && e.target.id === 'code') joinGame();
@@ -186,7 +186,7 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'BUTTON') return; // a focused lobby button keeps Enter / Space (the click handlers blur it)
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.repeat) return;
-  if (e.code === 'Escape') return net === 'solo' && togglePause(); // online: the world never stops
+  if (e.code === 'KeyP') return net === 'solo' && togglePause(); // not Esc: Firefox spends it on leaving fullscreen. Online: the world never stops
   if (paused) return; // before unlock(): it resumes the audio context
   if (state.entry !== undefined) { // SUNK screen: typing initials, nothing else reacts (no mute, no reload)
     e.preventDefault();
@@ -449,6 +449,12 @@ const statBars = (s) => [
 $('select-list').innerHTML = PREVIEW.map((s, i) =>
   `<div class="card"><kbd>${i + 1}</kbd><b>${s.name.toUpperCase()}</b><span class="blurb">${PLAYER_SHIPS[i].blurb}</span><div class="stats">${statBars(s)}</div>` +
   `<div class="kit">${s.skills.map((k) => `<img src="${ICON[k.id]}">${SKILLS[k.id].name}`).join('<br>')}</div></div>`).join('');
+// mouse: a click on a ship card or a refit card presses its digit key
+// ponytail: replays the key handler so the lobby/pause/guest rules stay in one place
+for (const id of ['select-list', 'cards-list']) $(id).addEventListener('click', (e) => {
+  const c = e.target.closest('.card');
+  if (c) dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit' + ([...c.parentNode.children].indexOf(c) + 1) }));
+});
 function makePirate(s, pid, pick, name) {
   return Object.assign(s, { isPlayer: true, pid, pick, tag: nick(name) || 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
 }
@@ -1234,7 +1240,7 @@ const lobbyLock = (on) => { for (const el of $('lobby').querySelectorAll('button
 function online() {
   if (net !== 'solo' || state.mode !== 'select') return false;
   if (typeof Peer === 'undefined') { lobbyMsg('ONLINE UNAVAILABLE (PeerJS did not load)'); return false; }
-  if (paused) togglePause(); // paused on ship select (alt-tab for the code): online there is no Esc to clear it
+  if (paused) togglePause(); // paused on ship select (alt-tab for the code): online there is no P to clear it
   document.activeElement?.blur(); // a focused input, once disabled, keeps eating the keys (Firefox)
   lobbyLock(true);
   return true;

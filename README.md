@@ -69,7 +69,7 @@ Keys are physical positions, so AZERTY (ZQSD) and QWERTY (WASD) both work. AZERT
 | `Space` | Board nearby ship |
 | `C` | Toggle overview zoom |
 | `M` | Mute |
-| `Esc` | Pause |
+| `P` | Pause |
 
 ## Features
 

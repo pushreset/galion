@@ -34,6 +34,8 @@
   #cards h2 { margin: 0 0 10px; font: inherit; font-size: 18px; }
   #cards-list { display: flex; gap: 12px; }
   .card { width: 150px; padding: 14px 10px; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 3px #ad7a48; font-size: 13px; line-height: 1.5; display: grid; gap: 8px; }
+  #select .card, #cards .card { pointer-events: auto; cursor: pointer; }
+  #select .card:hover, #cards .card:hover { box-shadow: inset 0 0 0 3px #ffd24a; }
   .card kbd { font-size: 22px; }
   .card .icon { width: 32px; height: 32px; image-rendering: pixelated; justify-self: center; }
   #over, #pause { inset: 0; display: grid; place-items: center; background: rgba(12, 33, 64, 0.55); text-align: center; }
@@ -105,7 +107,7 @@
 </head>
 <body class="selecting">
 <canvas id="c"></canvas>
-<div id="select" class="hud panel"><h2>Choose your ship: press 1, 2 or 3</h2><div id="select-list"></div>
+<div id="select" class="hud panel"><h2>Choose your ship: click or press 1, 2 or 3</h2><div id="select-list"></div>
   <div id="lobby"><button id="gm">GAME: WAVES</button><input id="nick" maxlength="12" placeholder="NAME" autocomplete="off"><i class="br"></i>ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
 </div>
 <div id="room" class="hud panel" hidden></div>
@@ -130,10 +132,10 @@
   <div id="b-msg"></div>
   <div class="b-help"><kbd>SPACE</kbd> when the cursor is on the gold mark</div>
 </div>
-<div id="cards" class="hud panel" hidden><h2>Refit your ship: press 1, 2 or 3</h2><div id="cards-list"></div></div>
+<div id="cards" class="hud panel" hidden><h2>Refit your ship: click or press 1, 2 or 3</h2><div id="cards-list"></div></div>
 <div id="over" class="hud" hidden><div class="panel"><h1>SUNK</h1><div id="over-stats"></div><div id="over-help"><kbd>Space</kbd> to sail again</div></div></div>
-<div id="pause" class="hud" hidden><div class="panel"><h1>PAUSED</h1><div><kbd>Esc</kbd> to resume</div></div></div>
-<div id="help" class="hud panel"><kbd>Z</kbd>/<kbd>S</kbd> sail up/down · <kbd>Q</kbd>/<kbd>D</kbd> turn · <kbd>A</kbd> fire left · <kbd>E</kbd> fire right · <kbd>1</kbd>-<kbd>4</kbd> skills · <kbd>Space</kbd> board · <kbd>M</kbd> sound · <kbd>C</kbd> zoom · <kbd>Esc</kbd> pause</div>
+<div id="pause" class="hud" hidden><div class="panel"><h1>PAUSED</h1><div><kbd>P</kbd> to resume</div></div></div>
+<div id="help" class="hud panel"><kbd>Z</kbd>/<kbd>S</kbd> sail up/down · <kbd>Q</kbd>/<kbd>D</kbd> turn · <kbd>A</kbd> fire left · <kbd>E</kbd> fire right · <kbd>1</kbd>-<kbd>4</kbd> skills · <kbd>Space</kbd> board · <kbd>M</kbd> sound · <kbd>C</kbd> zoom · <kbd>P</kbd> pause</div>
 <script type="module" src="game.js"></script>
 </body>
 </html>
