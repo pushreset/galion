@@ -620,13 +620,24 @@ function sail() {
   hostStart();
   if (quick && roomOpen && !was && started()) quickBeatNow();
 }
-// quick match, host → server: the seats still free. 0 once the game started, or while this tab is hidden (no frames: a guest would sit in a frozen game)
+// quick match, host → server: the seats still free. 0 once the game started, or once this tab has been hidden for over a minute (no frames
+// there: a guest would sit in a frozen game). A shorter absence stays listed: a host who looks away while waiting must still get its guest,
+// and the bell in `join` calls it back.
+// ponytail: a host away for longer may find the slot taken when it returns, and then two hosts wait side by side; the server could tell the unlisted one to join the other
+const AWAY = 60000; // ms
+let hiddenAt = 0;
 function quickBeatNow() {
-  const on = started(), id = quickBeat;
-  match(quick, `&code=${room.code()}&free=${on || document.hidden ? 0 : MAX_PLAYERS - 1 - room.guests()}`)
+  const on = started(), id = quickBeat, away = hiddenAt && Date.now() - hiddenAt > AWAY;
+  match(quick, `&code=${room.code()}&free=${on || away ? 0 : MAX_PLAYERS - 1 - room.guests()}`)
     .then(() => { if (on) clearInterval(id); }).catch(() => {}); // started: beats stop once the server got the 0 (a failed one is retried at the next beat)
 }
-document.addEventListener('visibilitychange', () => { if (quick && net === 'host' && roomOpen && !started()) quickBeatNow(); }); // hidden: delist now; back: relist
+const TITLE = document.title;
+document.addEventListener('visibilitychange', () => {
+  hiddenAt = document.hidden ? Date.now() : 0;
+  if (document.hidden) return;
+  document.title = TITLE;
+  if (quick && net === 'host' && roomOpen && !started()) quickBeatNow(); // back from a long absence: relist
+});
 // PvP: 'between' (warm-up until the host presses Enter) → 'pvp' → 'over' (Enter: rematch)
 function pvpFlow(dt) {
   for (const p of players) {
@@ -1388,7 +1399,10 @@ function hostGame(m, code) {
       quickBeat = setInterval(quickBeatNow, 10000);
       quickBeatNow();
     },
-    join: (pid) => room.send(pid, { t: 'hi', pid, mode, convoy }),
+    join: (pid) => {
+      room.send(pid, { t: 'hi', pid, mode, convoy });
+      if (document.hidden) { document.title = 'A PIRATE JOINED · COME BACK'; sfx.bell(); } // the game only runs with this tab in front
+    },
     msg: (pid, msg) => {
       if (msg.t === 'ship') return addPlayer(pid, msg.i | 0, msg.nick);
       const p = players.find((o) => o.pid === pid);
