@@ -5,7 +5,9 @@
 // service hands out 1-hour credentials to the game's origin only; PeerJS's own TURN relays are gone (no DNS).
 const PREFIX = 'broadside-';
 // ?ice=http://127.0.0.1:3000/ points at a local copy of the service (its origin check only lets the game's own origin in); node (check.mjs) has no location
-const ICE_URL = new URLSearchParams(globalThis.location?.search).get('ice') || 'https://ice-cedthaqnw77lgzrdexjkvcwt.46.62.255.60.sslip.io/';
+// loopback only: a link must not pick a player's TURN and matchmaking server
+const ice = new URLSearchParams(globalThis.location?.search).get('ice');
+const ICE_URL = /^http:\/\/(127\.0\.0\.1|localhost):\d+\/$/.test(ice) ? ice : 'https://ice-cedthaqnw77lgzrdexjkvcwt.46.62.255.60.sslip.io/';
 // unreachable → PeerJS's defaults (Google STUN): direct links still work, strict NATs don't
 const peerOpts = () => fetch(ICE_URL, { signal: AbortSignal.timeout(4000) }).then((r) => r.json())
   .then(({ iceServers }) => ({ config: { iceServers } })).catch(() => ({}));

@@ -205,7 +205,7 @@ addEventListener('keydown', (e) => {
   // physical digit codes: AZERTY users don't need Shift
   const pick = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3 }[e.code];
   if (net === 'guest' ? guestShip === null : state.mode === 'select') {
-    if (pick < 3 && (net === 'solo' || (net === 'guest' ? myPid : roomOpen))) choosePlayer(pick); // guest: only once the host said hi; host: once the room is open
+    if (pick < 3 && (net === 'solo' ? !quick : net === 'guest' ? myPid : roomOpen)) choosePlayer(pick); // solo: not while quick match searches; guest: only once the host said hi; host: once the room is open
     return;
   }
   if ((state.mode === 'dead' && state.t > 3) && (e.code === 'Space' || e.code === 'Enter')) return location.reload();
@@ -979,7 +979,7 @@ function hud() {
   $('room').hidden = net === 'solo';
   if (net !== 'solo') {
     const n = players.length, wait = net === 'host' && (mode === 'coop' ? state.mode === 'between' && state.wave === 0 && !state.go : state.mode !== 'pvp');
-    setHTML($('room'), (net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${n} PIRATES`) +
+    setHTML($('room'), (net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${esc(room.code())}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${n} PIRATES`) +
       (wait && me ? `<br><kbd>Enter</kbd> ${mode === 'pvp' ? (state.mode === 'over' ? 'rematch' : 'start the match') : 'set sail'}` : ''));
   }
   if (!me) return;
@@ -1332,12 +1332,14 @@ function quickGame(m, skip = '', tries = 0) {
   const q = m === 'pvp' ? 'pvp' : convoy ? 'coop-convoy' : 'coop-waves';
   lobbyLock(true);
   lobbyMsg('SEARCHING…');
+  quick = q; // set now: no ship pick while searching (offline() clears it)
   match(q, skip && `&skip=${skip}`).then((r) => {
     if (r.retry) return setTimeout(() => quickGame(m, '', tries), 1000); // a room is opening: join it once its host is reachable
+    const code = r.host || r.join;
+    if (!/^[A-Z]{4}$/.test(code)) throw new Error('bad answer'); // an old service build, or not our service: the code reaches innerHTML
     lobbyLock(false); // online() locks it again
-    quick = q;
     quickTries = tries;
-    if (r.host) hostGame(m, r.host); else joinGame(r.join);
+    if (r.host) hostGame(m, code); else joinGame(code);
   }).catch(() => offline('MATCHMAKING UNREACHABLE'));
 }
 // a quick room that could not be hosted or joined: ask again, telling the server to drop that one
@@ -1364,8 +1366,11 @@ function hostGame(m, code) {
       roomOpen = true;
       if (!quick) return lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`);
       lobbyMsg(`QUICK ${modeName()} · waiting for pirates · keep this tab in front`);
-      // every 10 s, the seats still free; 0 once the game started (the server stops sending guests here)
-      const beat = () => match(quick, `&code=${code}&free=${started() ? 0 : MAX_PLAYERS - 1 - room.guests()}`).catch(() => {});
+      // every 10 s, the seats still free; 0 once the game started (the server stops sending guests here), then no more beats
+      const beat = () => {
+        if (started()) clearInterval(quickBeat);
+        match(quick, `&code=${code}&free=${started() ? 0 : MAX_PLAYERS - 1 - room.guests()}`).catch(() => {});
+      };
       beat();
       quickBeat = setInterval(beat, 10000);
     },
@@ -1400,6 +1405,7 @@ function joinGame(code = $('code').value.trim().toUpperCase()) {
     msg: (m) => {
       if (m.t === 'hi') { myPid = m.pid; mode = m.mode; setConvoy(!!m.convoy); lobbyMsg(`JOINED ${modeName()} · pick your ship: 1, 2 or 3`); }
       else if (m.s && guestShip !== null) applySnap(m);
+      else if (m.s) lobbyMsg(`${/^SETTING SAIL/.test(m.g?.banner) ? m.g.banner : `JOINED ${modeName()}`} · pick your ship: 1, 2 or 3`); // no ship yet: still see the quick-match clock (textContent)
     },
     close: () => {
       if (!myPid) return quick ? retryQuick(code) : offline('ROOM FULL, CLOSED OR UNREACHABLE');

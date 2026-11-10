@@ -50,9 +50,9 @@ services:
           function match(q, p) {
             const now = Date.now(), r = rooms[q], code = p.get('code');
             if (code) {
-              if (r?.code !== code) return null;
               const free = Math.max(0, Math.min(SEATS, parseInt(p.get('free'), 10) || 0));
-              if (free) Object.assign(r, { free, seen: now, ready: true }); else rooms[q] = null;
+              if (r?.code === code) { if (free) Object.assign(r, { free, seen: now, ready: true }); else rooms[q] = null; }
+              else if (!r && free && /^[A-Z]{4}$/.test(code)) rooms[q] = { code, free, seen: now, ready: true }; // dropped (skip, full, timeout, restart) but still waiting: relist
               return null;
             }
             // a guest reports a dead / full room (skip); a host gone quiet; a host that never opened its room
