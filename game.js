@@ -153,9 +153,10 @@ const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '
 const held = new Set();
 const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC']);
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') { // typing a room code; Escape hands the keys back to the game
+  if (e.target.tagName === 'INPUT') { // typing a room code (letters only): Escape and the ship digits go back to the game
     if (e.code === 'Enter') joinGame();
-    if (e.code !== 'Escape') return;
+    if (e.code !== 'Escape' && !/^(Digit|Numpad)\d$/.test(e.code)) return;
+    e.preventDefault(); // the digit picks a ship, it isn't typed
     e.target.blur();
   }
   // Without this, Firefox's find-as-you-type swallows letter keys and opens its search bar.
@@ -440,8 +441,15 @@ function addPlayer(pid, i) {
 }
 function respawn(p, hpFrac) {
   const a = mode === 'coop' && anyAlive(p);
-  const r = Math.random() * Math.PI * 2; // random bearing: two respawns beside the same crewmate never share a spot
-  const [x, z] = a ? [a.x + Math.cos(r) * 12, a.z + Math.sin(r) * 12] : spawnPoint(p);
+  let [x, z] = a ? [a.x, a.z] : spawnPoint(p);
+  // co-op: beside a crewmate, on open water: clear of islands, the arena edge and every other hull
+  // (a random bearing, widening the ring if the water is crowded; the last try is used if none is free)
+  for (let i = 0; a && i < 40; i++) {
+    const r = Math.random() * Math.PI * 2, d = 12 + i * 0.5;
+    x = a.x + Math.cos(r) * d; z = a.z + Math.sin(r) * d;
+    if (Math.max(Math.abs(x), Math.abs(z)) < ARENA - 6 && !ISLANDS.some((I) => Math.hypot(x - I.x, z - I.z) < I.r + 8)
+      && !ships.some((o) => o !== p && o.alive && Math.hypot(x - o.x, z - o.z) < 10)) break;
+  }
   const h = a ? a.h : Math.atan2(-z, -x);
   Object.assign(p, { x, z, h, alive: true, hp: p.maxHp * hpFrac, sinkT: 0, speed: 0, sail: 0, turnIn: 0, turnRate: 0, burnT: 0, slowT: 0, calm: 0, wrecked: false, respawnAt: undefined });
   if (hpFrac === 1) p.crew = p.maxCrew; // PvP: a fresh ship, not a hull with no gunners
