@@ -104,7 +104,7 @@
 <body class="selecting">
 <canvas id="c"></canvas>
 <div id="select" class="hud panel"><h2>Choose your ship: press 1, 2 or 3</h2><div id="select-list"></div>
-  <div id="lobby">ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
+  <div id="lobby"><button id="gm">GAME: WAVES</button> ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
 </div>
 <div id="room" class="hud panel" hidden></div>
 <div id="stats" class="hud panel">
@@ -114,7 +114,7 @@
   <span><kbd>E</kbd> STAR</span><div class="bar"><i id="rs"></i></div>
   <span>CREW <b id="crewn"></b></span><div class="bar"><i id="crew"></i></div>
 </div>
-<div id="score" class="hud panel"><div id="pvp" hidden></div><div id="coop">GOLD <b id="gold">0</b><br>WAVE <b id="wave">0</b></div><div id="combo" hidden>COMBO <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
+<div id="score" class="hud panel"><div id="pvp" hidden></div><div id="coop">GOLD <b id="gold">0</b><br><span id="wave-l">WAVE</span> <b id="wave">0</b><span id="navy" hidden><br>NAVY GOLD <b id="delivered">0</b></span></div><div id="combo" hidden>COMBO <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
 <div id="bars" class="hud"><div id="board-hint" hidden></div></div>
 <div id="skills" class="hud"></div>
 <div id="radar-box" class="hud"><canvas id="radar"></canvas></div>

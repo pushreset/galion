@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ISLANDS, shoreR } from './sim.js';
+import { ISLANDS, BOUNDS, shoreR } from './sim.js';
 import { mat } from './ships.js';
 
 export function rng(seed) {
@@ -173,8 +173,33 @@ function fort(group, y0, s) {
   return cannons;
 }
 
-export function createWorld(scene) {
-  const forts = [];
+// Port town: whitewashed houses with tiled roofs and a jetty reaching toward the middle of the map.
+function port(group, isl, rand) {
+  const dir = isl.x < 0 ? 1 : -1, y0 = 0.9;
+  const jetty = stoneBox(11, 0.25, 2.2, dir * (isl.r + 2.5), 0.75, 0, '#8d5c35');
+  group.add(jetty);
+  for (let i = 0; i < 4; i++) for (const sz of [-1, 1]) group.add(stoneBox(0.35, 1.6, 0.35, dir * (isl.r - 1.5 + i * 3), 0.2, sz * 1.1, '#56351f'));
+  for (const [fx, fz, w, h] of [[0.3, -0.42, 3.2, 2.2], [0.1, 0.4, 2.8, 1.9], [-0.25, -0.1, 3.6, 2.6], [0.45, 0.2, 2.4, 1.8]]) {
+    const x = dir * fx * isl.r, z = fz * isl.r;
+    group.add(stoneBox(w, h, w * 0.8, x, y0 + h / 2, z, '#f5ecd2'));
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(w * 0.78, 1.3, 4), mat('#a52623'));
+    roof.position.set(x, y0 + h + 0.65, z);
+    roof.rotation.y = Math.PI / 4;
+    roof.scale.z = 0.8;
+    roof.castShadow = true;
+    group.add(roof);
+  }
+  for (let i = 0; i < 4; i++) {
+    const p = palm(rand), a = Math.PI / 2 + (rand() - 0.5) + (i % 2) * Math.PI, rr = isl.r * (0.5 + rand() * 0.2);
+    p.position.set(Math.cos(a) * rr, y0, Math.sin(a) * rr);
+    group.add(p);
+  }
+}
+
+// Builds the current map (sim.js ISLANDS) under one root group, so game.js can swap maps.
+export function createWorld(parent) {
+  const forts = [], scene = new THREE.Group();
+  parent.add(scene);
   ISLANDS.forEach((isl, idx) => {
     const rand = rng(1000 + idx * 77);
     const g = new THREE.Group();
@@ -203,6 +228,14 @@ export function createWorld(scene) {
         p.position.set(Math.cos(a) * isl.r * 0.62, 4.5, Math.sin(a) * isl.r * 0.62);
         g.add(p);
       }
+    } else if (isl.kind === 'port') {
+      g.add(islandMesh(isl, rand, [
+        [1.0, 0.1, 0.05, '#e6cc8e', '#f6e6b4'],
+        [0.84, 0.55, 0.05, '#c9a86a', '#e6cc8e'],
+        [0.72, 0.9, 0.04, '#c9a86a'],
+        [0.3, 0.95, 0.02, '#e6cc8e'],
+      ]));
+      port(g, isl, rand);
     } else {
       const rocky = isl.kind === 'rocky';
       g.add(islandMesh(isl, rand, [
@@ -236,12 +269,12 @@ export function createWorld(scene) {
   // scattered sea rocks
   const rand = rng(42);
   for (let i = 0; i < 22; i++) {
-    const x = (rand() - 0.5) * 230, z = (rand() - 0.5) * 230;
+    const x = (rand() - 0.5) * (BOUNDS.x * 2 - 10), z = (rand() - 0.5) * (BOUNDS.z * 2 - 10);
     if (Math.hypot(x, z) < 20) continue;
     if (ISLANDS.some((I) => Math.hypot(x - I.x, z - I.z) < I.r + 8)) continue;
     const r = rock(rand, 0.5 + rand() * 0.9, rand() > 0.5 ? '#8d5c35' : '#9695a0');
     r.position.set(x, 0.1, z);
     scene.add(r);
   }
-  return { forts };
+  return { forts, root: scene };
 }

@@ -58,7 +58,8 @@ export function createRadar(canvas) {
   const toRadar = (dx, dz) => [(dx - dz) / Math.SQRT2, (dx + dz) / Math.SQRT2];
   const px = (x, y, w, col) => { g.fillStyle = col; g.fillRect(Math.round(x - w / 2), Math.round(y - w / 2), w, w); };
 
-  return function draw(player, ships, loot, fort) {
+  // forts: [{x, z, active}]; ports: [{x, z, goal}] (goal: where the convoy is bound, shown even off the rose)
+  return function draw(player, ships, loot, forts, ports = []) {
     g.clearRect(0, 0, S, S);
     g.drawImage(rose, 0, 0);
     const place = (x, z) => {
@@ -68,8 +69,15 @@ export function createRadar(canvas) {
       return { x: C + rx * k, y: C + ry * k, out: d > RANGE, a: Math.atan2(ry, rx) };
     };
     for (const o of loot) { const p = place(o.x, o.z); if (!p.out) px(p.x, p.y, 2, '#c9952a'); }
-    if (fort) {
+    for (const o of ports) {
+      const p = place(o.x, o.z);
+      if (p.out && !o.goal) continue;
+      px(p.x, p.y, 8, '#1b110b');
+      px(p.x, p.y, 6, o.goal ? '#ffffff' : '#8d5c35');
+    }
+    for (const fort of forts) {
       const p = place(fort.x, fort.z);
+      if (p.out) continue;
       px(p.x, p.y, 6, '#1b110b');
       px(p.x, p.y, 4, fort.active ? '#a52623' : '#6f6f7c');
     }

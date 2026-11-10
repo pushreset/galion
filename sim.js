@@ -2,7 +2,7 @@
 // World plane is (x, z), y up. Heading h: forward = (cos h, sin h).
 // Increasing h turns toward starboard; starboard = (-sin h, cos h), port = (sin h, -cos h).
 
-export const ARENA = 120; // half-size of the playable square
+export const BOUNDS = { x: 120, z: 120 }; // half-size of the playable rectangle (setMap)
 
 export const TYPES = {
   galleon: { len: 14, beam: 4.2, hp: 120, speed: 8.5, turn: 0.62, cannons: 5, range: 34, reloadTime: 4.8, gold: 35, aimTol: 0.12, crew: 40 },
@@ -16,15 +16,37 @@ export function shoreR(isl, a) {
   return isl.r * (1 + 0.12 * Math.sin(3 * a + isl.ph) + 0.07 * Math.sin(5 * a + isl.ph * 1.7));
 }
 
-export const ISLANDS = [
-  { x: -38, z: -26, r: 10, ph: 0.4, kind: 'rocky' },
-  { x: 46, z: -48, r: 13, ph: 2.1, kind: 'fort' },
-  { x: 30, z: 38, r: 7.5, ph: 4.0, kind: 'palm' },
-  { x: -58, z: 52, r: 6.5, ph: 1.3, kind: 'palm' },
-  { x: -8, z: 86, r: 5, ph: 5.2, kind: 'rocky' },
-  { x: 82, z: 30, r: 6, ph: 3.3, kind: 'palm' },
-  { x: -86, z: -70, r: 7, ph: 0.9, kind: 'rocky' },
-];
+// waves: the open square (waves, PvP). convoy: a long channel between two ports, forts guarding the route.
+// At most 8 islands per map (water.js shader). setMap swaps ISLANDS / BOUNDS in place, so importers stay valid.
+export const MAPS = {
+  waves: { x: 120, z: 120, islands: [
+    { x: -38, z: -26, r: 10, ph: 0.4, kind: 'rocky' },
+    { x: 46, z: -48, r: 13, ph: 2.1, kind: 'fort' },
+    { x: 30, z: 38, r: 7.5, ph: 4.0, kind: 'palm' },
+    { x: -58, z: 52, r: 6.5, ph: 1.3, kind: 'palm' },
+    { x: -8, z: 86, r: 5, ph: 5.2, kind: 'rocky' },
+    { x: 82, z: 30, r: 6, ph: 3.3, kind: 'palm' },
+    { x: -86, z: -70, r: 7, ph: 0.9, kind: 'rocky' },
+  ] },
+  convoy: { x: 200, z: 70, islands: [
+    { x: -188, z: 0, r: 12, ph: 0.7, kind: 'port', name: 'PORT ROYAL' },
+    { x: 188, z: 0, r: 12, ph: 3.9, kind: 'port', name: 'TORTUGA' },
+    { x: -125, z: -34, r: 12, ph: 2.1, kind: 'fort' },
+    { x: -80, z: 34, r: 8, ph: 1.3, kind: 'palm' },
+    { x: -38, z: -38, r: 9, ph: 0.4, kind: 'rocky' },
+    { x: 40, z: 40, r: 12, ph: 5.0, kind: 'fort' },
+    { x: 85, z: -32, r: 8, ph: 4.0, kind: 'palm' },
+    { x: 130, z: 26, r: 9, ph: 0.9, kind: 'rocky' },
+  ] },
+};
+export const ISLANDS = [...MAPS.waves.islands];
+export function setMap(name) {
+  const m = MAPS[name];
+  ISLANDS.splice(0, Infinity, ...m.islands);
+  BOUNDS.x = m.x; BOUNDS.z = m.z;
+}
+// navy (1) and merchants (2) sail together: no friendly fire, no ram damage between them
+const allied = (a, b) => a === b || (a === 1 && b === 2) || (a === 2 && b === 1);
 
 export function makeShip(type, team, x = 0, z = 0, h = 0) {
   const t = TYPES[type];
@@ -101,10 +123,10 @@ function collide(s) {
       hit = Math.max(hit, s.speed);
     }
   }
-  const lim = ARENA - rad;
-  if (Math.abs(s.x) > lim || Math.abs(s.z) > lim) {
-    s.x = Math.max(-lim, Math.min(lim, s.x));
-    s.z = Math.max(-lim, Math.min(lim, s.z));
+  const lx = BOUNDS.x - rad, lz = BOUNDS.z - rad;
+  if (Math.abs(s.x) > lx || Math.abs(s.z) > lz) {
+    s.x = Math.max(-lx, Math.min(lx, s.x));
+    s.z = Math.max(-lz, Math.min(lz, s.z));
     hit = Math.max(hit, s.speed);
   }
   if (hit) s.speed *= 0.5;
@@ -165,7 +187,7 @@ export function stepBall(b, dt, ships) {
   b.z += b.vz * dt;
   // Height is cosmetic: any ball crossing a hull's footprint hits, so nothing ever sails over a ship.
   for (const s of ships) {
-    if (!s.alive || s.team === b.team) continue;
+    if (!s.alive || allied(s.team, b.team)) continue;
     const dx = b.x - s.x, dz = b.z - s.z, c = Math.cos(s.h), sn = Math.sin(s.h);
     const lx = dx * c + dz * sn, lz = -dx * sn + dz * c;
     if (Math.abs(lx) < s.len / 2 && Math.abs(lz) < s.beam * 0.6) {
@@ -198,7 +220,7 @@ export function collideShips(ships) {
       a.x -= nx * push; a.z -= nz * push;
       b.x += nx * push; b.z += nz * push;
       const closing = (Math.cos(a.h) * a.speed - Math.cos(b.h) * b.speed) * nx + (Math.sin(a.h) * a.speed - Math.sin(b.h) * b.speed) * nz;
-      if (closing > 3 && a.team !== b.team) { // allies just bump
+      if (closing > 3 && !allied(a.team, b.team)) { // allies just bump
         a.lastHit = b.team; b.lastHit = a.team;
         damage(a, closing * 1.2);
         damage(b, closing * 1.2);
@@ -256,8 +278,23 @@ function steerTo(s, want) {
     }
   }
   const px = s.x + Math.cos(s.h) * 14, pz = s.z + Math.sin(s.h) * 14;
-  if (Math.abs(px) > ARENA - 8 || Math.abs(pz) > ARENA - 8) want = Math.atan2(-s.z, -s.x);
+  if (Math.abs(px) > BOUNDS.x - 8 || Math.abs(pz) > BOUNDS.z - 8) want = Math.atan2(-s.z, -s.x);
   s.turnIn = Math.max(-1, Math.min(1, wrap(want - s.h) * 2));
+}
+
+// Convoy escort, guard profile: holds a station abeam of its ward (s.station: + starboard, - port) and
+// fights only a pirate within 45 of the ward, so it never gets lured away. Returns a fire side or 0.
+export function guardSteer(s, ward, tgt) {
+  if (!s.alive) return 0;
+  if (!ward || (tgt.alive && Math.hypot(tgt.x - ward.x, tgt.z - ward.z) < 45)) return aiSteer(s, tgt);
+  const px = ward.x - Math.sin(ward.h) * s.station, pz = ward.z + Math.cos(ward.h) * s.station;
+  const dx = px - s.x, dz = pz - s.z, c = Math.cos(ward.h), sn = Math.sin(ward.h);
+  if (Math.hypot(dx, dz) > 25) { s.sail = 3; steerTo(s, Math.atan2(dz, dx)); return 0; } // catch up
+  // alongside: sail the ward's course, nudged toward the station; trim sail to stay level (an escort is faster than its merchant)
+  const along = dx * c + dz * sn, across = -dx * sn + dz * c;
+  s.sail = along > 6 ? 3 : along > -2 ? 2 : 1;
+  steerTo(s, ward.h + Math.max(-0.7, Math.min(0.7, across * 0.08)));
+  return 0;
 }
 
 // --- merchants (team 2): flee the player, run for a far waypoint, rich loot -------
@@ -270,17 +307,22 @@ export function merchantSpec(k, rand = Math.random) {
     return { type, armed: k >= 5, escort: type === 'galleon' };
   });
 }
+// Convoy k (convoy mode): 2 merchants, one more every 3 convoys (max 5); brigs from 3, armed from 4, galleons from 5.
+export function convoySpec(k, rand = Math.random) {
+  return Array.from({ length: Math.min(5, 2 + Math.floor(k / 3)) }, () =>
+    ({ type: k >= 5 && rand() < 0.4 ? 'galleon' : k >= 3 && rand() < 0.5 ? 'brig' : 'sloop', armed: k >= 4 }));
+}
 export function makeMerchant(type, x, z, h, armed, dest) {
   const s = makeShip(type, 2, x, z, h);
   const crew = Math.round(s.crew * 0.6); // sailors, not marines: easy to board
-  return Object.assign(s, { merchant: true, armed, dest, age: 0, calm: 99, gold: s.gold * 3, maxSpeed: s.maxSpeed * 0.75, crew, maxCrew: crew });
+  return Object.assign(s, { merchant: true, armed, dest, age: 0, maxAge: 100, calm: 99, gold: s.gold * 3, maxSpeed: s.maxSpeed * 0.75, crew, maxCrew: crew });
 }
 // Returns 'escaped', a fire side (armed and hit in the last 6 s: fights like the navy), or 0.
 export function merchantSteer(s, player, dt) {
   if (!s.alive) return 0;
   s.age += dt;
   s.calm += dt;
-  if (Math.hypot(s.dest.x - s.x, s.dest.z - s.z) < 8 || s.age > 100) return 'escaped';
+  if (Math.hypot(s.dest.x - s.x, s.dest.z - s.z) < 8 || s.age > s.maxAge) return 'escaped';
   if (s.armed && s.calm < 6 && player.alive) return aiSteer(s, player);
   let want = Math.atan2(s.dest.z - s.z, s.dest.x - s.x);
   s.sail = 2;
@@ -344,9 +386,9 @@ export function fireTurret(t, tgt, dt, rand = Math.random) {
 
 // --- waves & upgrades ---------------------------------------------------------
 // Gentle ramp: wave 1 is a lone sloop, brigs from 2, galleons from 4. game.js spawns them one by one.
-// mult scales the budget for co-op crews (capped at 8 ships either way).
-export function waveSpec(k, rand = Math.random, mult = 1) {
-  let budget = (0.5 + k) * mult;
+// mult scales the budget for co-op crews, extra adds to it (convoy mode: gold the merchants delivered); capped at 8 ships either way.
+export function waveSpec(k, rand = Math.random, mult = 1, extra = 0) {
+  let budget = (0.5 + k) * mult + extra;
   const opts = [['sloop', 1]];
   if (k >= 2) opts.push(['brig', 2]);
   if (k >= 4) opts.push(['galleon', 3]);

@@ -18,6 +18,7 @@ Then open the printed URL. Three.js loads from jsDelivr, so there's no install s
 
 Peer-to-peer, no server to run: on the ship select screen, one player clicks **HOST CO-OP** or **HOST PVP** and shares the 4-letter room code; the others type it and click **JOIN**, then everyone picks a ship. The host presses `Enter` to set sail (co-op) or start the match (PvP).
 
+- **Convoy** (solo or co-op: set the **GAME** button to CONVOY before picking a ship or hosting): its own long map between two ports, forts on the way. Each round a merchant convoy sails port to port with its escort: guards that stay beside the merchants, hunters that come for you. The round ends when every merchant is sunk, captured or in port. Gold that reaches port buys a bigger escort for the next convoys.
 - **Co-op**: shared gold, bigger waves, each pirate picks their own refit cards; a sunk pirate comes back at the next break, the run ends when the whole crew is sunk.
 - **PvP**: first to 10 sinkings (or most after 5 min). Each sinking refits the winner; merchants keep coming as loot (their barrels patch your hull).
 - Online there's no pause and no boarding QTE: only ships under 20% hull (striking their colours) can be boarded.
