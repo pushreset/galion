@@ -177,7 +177,7 @@ const held = new Set();
 const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC']);
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') { // typing a room code (letters only): Escape and the ship digits go back to the game
-    if (e.code === 'Enter') joinGame();
+    if (e.code === 'Enter' && e.target.id === 'code') joinGame();
     if (e.code !== 'Escape' && !/^(Digit|Numpad)\d$/.test(e.code)) return;
     e.preventDefault(); // the digit picks a ship, it isn't typed
     e.target.blur();
@@ -449,8 +449,8 @@ const statBars = (s) => [
 $('select-list').innerHTML = PREVIEW.map((s, i) =>
   `<div class="card"><kbd>${i + 1}</kbd><b>${s.name.toUpperCase()}</b><span class="blurb">${PLAYER_SHIPS[i].blurb}</span><div class="stats">${statBars(s)}</div>` +
   `<div class="kit">${s.skills.map((k) => `<img src="${ICON[k.id]}">${SKILLS[k.id].name}`).join('<br>')}</div></div>`).join('');
-function makePirate(s, pid, pick) {
-  return Object.assign(s, { isPlayer: true, pid, pick, tag: 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
+function makePirate(s, pid, pick, name) {
+  return Object.assign(s, { isPlayer: true, pid, pick, tag: nick(name) || 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
 }
 function hideSelect() {
   for (const s of PREVIEW) {
@@ -465,12 +465,12 @@ let guestShip = null;
 function choosePlayer(i) {
   if (net === 'guest') { // the host builds our ship; snapshots bring it back
     guestShip = i;
-    room.send({ t: 'ship', i });
+    room.send({ t: 'ship', i, nick: $('nick').value });
     me = null;
     hideSelect();
     return;
   }
-  me = makePirate(PREVIEW[i], 0, i);
+  me = makePirate(PREVIEW[i], 0, i, $('nick').value);
   if (!ships.includes(me)) ships.push(me); // a host's previews wait outside the sim (hostGame)
   players.push(me);
   hideSelect();
@@ -479,10 +479,10 @@ function choosePlayer(i) {
   banner(me.name.toUpperCase() + ' SETS SAIL', 2, true);
 }
 // a guest picked a ship: co-op drops them beside a crewmate, PvP somewhere safe
-function addPlayer(pid, i) {
+function addPlayer(pid, i, name) {
   if (players.some((p) => p.pid === pid) || !PLAYER_SHIPS[i]) return;
   if (state.mode === 'dead') return banner('THIS RUN IS OVER', 3); // no ship: a latecomer must not sign a score for it
-  const p = makePirate(makePlayer(i), pid, i);
+  const p = makePirate(makePlayer(i), pid, i, name);
   addShip(p.type, 'pirate', p.team, 0, 0, 0, 0, p);
   players.push(p);
   respawn(p, 1);
@@ -927,14 +927,14 @@ function hud() {
   camera.updateMatrixWorld();
   const W = canvas.clientWidth, H = canvas.clientHeight;
   for (const s of [...ships, ...forts]) {
-    if (s === me || (s.team === 0 && !s.isPlayer)) { if (s.bar) s.bar.hidden = true; continue; } // a crewmate who left: no frozen bar
+    if ((s === me && net === 'solo') || (s !== me && s.team === 0 && !s.isPlayer)) { if (s.bar) s.bar.hidden = true; continue; } // a crewmate who left: no frozen bar
     if (!s.bar) {
       s.bar = document.createElement('div');
-      s.bar.className = s.isPlayer ? (s.team === me.team ? 'ebar p' : 'ebar e') : s.merchant ? 'ebar m' : 'ebar';
-      s.bar.dataset.tag = s.tag || '';
+      s.bar.className = s === me ? 'ebar self' : s.isPlayer ? (s.team === me.team ? 'ebar p' : 'ebar e') : s.merchant ? 'ebar m' : 'ebar';
       s.bar.innerHTML = '<i></i>';
       $('bars').append(s.bar);
     }
+    if (s.bar.dataset.tag !== (s.tag || '')) s.bar.dataset.tag = s.tag || ''; // online: own ship gets a name-only label (.self)
     const show = s.alive && !s.escaped && (s.hp < s.maxHp || s.isPlayer);
     s.bar.hidden = !show;
     if (!show) continue;
@@ -1123,6 +1123,8 @@ function syncList(list, map, rows, keys, make) {
     list.splice(i, 1);
   }
 }
+// player name: up to 6 letters (digits in a lobby input pick a ship); also cleans what a guest or host sends
+const nick = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6);
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 function applySnap(m) {
   // glide over the gap the snapshots really arrive at (3 or 4 host frames, more on a slow link), not a fixed 50 ms
@@ -1161,7 +1163,7 @@ function applySnap(m) {
     const s = ships.find((o) => o.pid === e.pid);
     if (!s) continue;
     // host strings end up in innerHTML (scoreboard, cards, leaderboard): a guest never trusts them
-    Object.assign(e, { tag: 'P' + ((e.pid | 0) + 1), name: esc(e.name), kills: +e.kills || 0,
+    Object.assign(e, { tag: nick(e.tag) || 'P' + ((e.pid | 0) + 1), name: esc(e.name), kills: +e.kills || 0,
       cards: (e.cards || []).map((c) => ({ id: String(c.id), label: esc(c.label) })),
       skills: (e.skills || []).filter((k) => Object.hasOwn(SKILLS, k.id)).slice(0, 4).map((k) => ({ id: k.id, lvl: Math.max(1, Math.min(3, k.lvl | 0)) })),
       cd: e.cd || {}, reload: e.reload || { port: 0, star: 0 } }); // a bad value here would throw in hud() and stop the frame loop
@@ -1259,7 +1261,7 @@ function hostGame(m) {
     open: (code) => { roomOpen = true; lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`); },
     join: (pid) => room.send(pid, { t: 'hi', pid, mode, convoy }),
     msg: (pid, msg) => {
-      if (msg.t === 'ship') return addPlayer(pid, msg.i | 0);
+      if (msg.t === 'ship') return addPlayer(pid, msg.i | 0, msg.nick);
       const p = players.find((o) => o.pid === pid);
       if (p) act(p, msg);
     },
@@ -1296,6 +1298,8 @@ function joinGame() {
     error: (e) => { if (!myPid) offline(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : `CONNECTION FAILED (${e.type})`); },
   });
 }
+try { $('nick').value = nick(localStorage.getItem('gallion-nick')); } catch {}
+$('nick').oninput = (e) => { e.target.value = nick(e.target.value); try { localStorage.setItem('gallion-nick', e.target.value); } catch {} };
 $('gm').onclick = (e) => { e.currentTarget.blur(); setConvoy(!convoy); };
 $('host-coop').onclick = (e) => { e.currentTarget.blur(); hostGame('coop'); };
 $('host-pvp').onclick = (e) => { e.currentTarget.blur(); hostGame('pvp'); };

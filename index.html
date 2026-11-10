@@ -94,7 +94,8 @@
   #room b { color: #ffd24a; font-weight: normal; font-size: 16px; }
   #room[hidden], #coop[hidden], #pvp[hidden] { display: none; }
   .ebar.p i { background: #94c54c; } .ebar.e i { background: #ff7a2a; }
-  .ebar.p::before, .ebar.e::before { content: attr(data-tag); position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); font-size: 10px; color: #f5ecd2; }
+  .ebar.self { background: none; border-color: transparent; } .ebar.self i { display: none; }
+  .ebar.p::before, .ebar.e::before, .ebar.self::before { content: attr(data-tag); position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); font-size: 10px; color: #f5ecd2; }
 </style>
 <script defer src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
 <script type="importmap">
@@ -104,7 +105,7 @@
 <body class="selecting">
 <canvas id="c"></canvas>
 <div id="select" class="hud panel"><h2>Choose your ship: press 1, 2 or 3</h2><div id="select-list"></div>
-  <div id="lobby"><button id="gm">GAME: WAVES</button> ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
+  <div id="lobby"><button id="gm">GAME: WAVES</button><input id="nick" maxlength="6" placeholder="NAME" autocomplete="off"> ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
 </div>
 <div id="room" class="hud panel" hidden></div>
 <div id="stats" class="hud panel">

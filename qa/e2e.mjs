@@ -43,12 +43,16 @@ const count = (page, k) => page.evaluate((k) => snd.filter((n) => n === k).lengt
 const H = await open('host'), G = await open('guest');
 await H.click('#host-pvp');
 const code = await lobby(H, /ROOM ([A-Z]{4})/);
+await G.fill('#nick', 'jack42!'); // letters only, 6 max
+assert.equal(await G.inputValue('#nick'), 'JACK');
 await G.fill('#code', code);
 await G.click('#join');
 await lobby(G, /(JOINED PVP)/);
 await G.keyboard.press('Digit1');
 await G.waitForFunction(() => __game.player, null, { timeout: 20000 });
 assert.equal(await H.evaluate(() => __game.state.mode), 'select');
+assert.equal(await H.evaluate(() => __game.players[0]?.tag), 'JACK', 'host did not get the guest name');
+await G.waitForFunction(() => document.querySelector('.ebar.self:not([hidden])')?.dataset.tag === 'JACK', null, { timeout: 5000 });
 
 // snapshots: 20 a second (state.t only changes on the guest when one arrives)
 const hz = await G.evaluate(() => new Promise((done) => {
