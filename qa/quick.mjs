@@ -55,7 +55,7 @@ try {
     await H.click('#quick-pvp');
     await lobby(H, /QUICK PVP · waiting/);
     await G.click('#quick-pvp');
-    await lobby(G, /JOINED PVP/);
+    await lobby(G, /pick your ship/); // not JOINED PVP: the countdown started when G connected, and a guest without a ship reads it there
     await G.evaluate(() => __game.choose(0));
     await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 });
     assert.ok(await G.evaluate(async () => { // the guest's countdown must not blink between two seconds
@@ -74,7 +74,7 @@ try {
     await lobby(H, /QUICK CONVOY · waiting/);
     await H.evaluate(() => __game.choose(1));
     await G.click('#quick-coop');
-    await lobby(G, /JOINED CONVOY/);
+    await lobby(G, /pick your ship/);
     await G.evaluate(() => __game.choose(2));
     await H.waitForFunction(() => __game.state.wave === 1, null, { timeout: 30000 });
     assert.equal(await H.evaluate(() => __game.players.length), 2, 'both pirates in the convoy run');
