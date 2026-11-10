@@ -1,0 +1,63 @@
+// Quick match, two browsers against a local copy of the ice service (coturn-compose.txt): node qa/quick.mjs
+// Same needs as qa/e2e.mjs: `python3 -m http.server 8765` in this repo, network access (PeerJS signalling), playwright-core.
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { chromium } = require(process.env.PLAYWRIGHT || '../../ttrpg-online-platform/node_modules/playwright-core');
+const URL = process.env.URL || 'http://127.0.0.1:8765/', PORT = 3123;
+
+// the service's script, as Coolify mounts it, on PORT and with the test page's origin
+const src = readFileSync(new globalThis.URL('../coturn-compose.txt', import.meta.url), 'utf8')
+  .split('content: |\n')[1].replace(/^ {10}/gm, '').replace('listen(3000)', `listen(${PORT})`);
+const ice = spawn(process.execPath, ['--input-type=module', '-'], { env: { ...process.env, ORIGIN: new globalThis.URL(URL).origin, TURN_SECRET: 'x', TURN_HOST: 'x' }, stdio: ['pipe', 'inherit', 'inherit'] });
+ice.stdin.end(src);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+await sleep(500);
+
+const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--ignore-gpu-blocklist', '--use-angle=metal'] });
+const errors = [];
+async function open(name) {
+  const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
+  page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
+  page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_|CORS/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
+  await page.goto(`${URL}?ice=http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
+  await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
+  return page;
+}
+const lobby = (page, re) => page.waitForFunction((s) => new RegExp(s).test(document.getElementById('lobby-msg').textContent), re.source, { timeout: 30000 });
+
+try {
+  // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host gets a ship)
+  {
+    const H = await open('pvp host'), G = await open('pvp guest');
+    await H.click('#quick-pvp');
+    await lobby(H, /QUICK PVP · waiting/);
+    await G.click('#quick-pvp');
+    await lobby(G, /JOINED PVP/);
+    await G.evaluate(() => __game.choose(0));
+    await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 });
+    await H.waitForFunction(() => __game.state.mode === 'pvp', null, { timeout: 25000 });
+    assert.equal(await H.evaluate(() => __game.players.length), 2, 'host and guest both sail');
+    await Promise.all([H.close(), G.close()]);
+  }
+  // 2. co-op convoy: its own queue, the host picks a ship, wave 1 sets sail without Enter
+  {
+    const H = await open('coop host'), G = await open('coop guest');
+    for (const p of [H, G]) await p.click('#gm'); // GAME: CONVOY
+    await H.click('#quick-coop');
+    await lobby(H, /QUICK CONVOY · waiting/);
+    await H.evaluate(() => __game.choose(1));
+    await G.click('#quick-coop');
+    await lobby(G, /JOINED CONVOY/);
+    await G.evaluate(() => __game.choose(2));
+    await H.waitForFunction(() => __game.state.wave === 1, null, { timeout: 30000 });
+    assert.equal(await H.evaluate(() => __game.players.length), 2, 'both pirates in the convoy run');
+  }
+  assert.deepEqual(errors, [], 'page errors');
+  console.log('quick match ok');
+} finally {
+  await browser.close();
+  ice.kill();
+}

@@ -5,7 +5,7 @@ import { buildShip, setGuns, buildTentacle } from './ships.js';
 import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
 import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
-import { hostRoom, joinRoom, MAX_PLAYERS } from './net.js';
+import { hostRoom, joinRoom, match, MAX_PLAYERS } from './net.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
   const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
@@ -77,6 +77,8 @@ const fx = createFx(scene, wakes);
 let convoy = false;
 const modeName = () => (mode === 'pvp' ? 'PVP' : convoy ? 'CONVOY' : 'CO-OP');
 let net = 'solo', mode = 'coop', room = null, myPid = 0, roomOpen = false; // roomOpen: the host's room got its code
+// quick match: the server queue this room came from ('pvp' | 'coop-waves' | 'coop-convoy'), the host's countdown end, attempts so far
+let quick = null, quickAt = null, quickTries = 0, quickBeat = 0;
 const events = [];
 for (const k of ['hit', 'splash', 'muzzle']) {
   const f = fx[k];
@@ -542,6 +544,7 @@ function flow(dt) {
   state.t += dt;
   setCombat(state.mode === 'fight' || state.mode === 'pvp');
   if (state.banner > 0) state.banner -= dt;
+  quickFlow();
   if (mode === 'pvp') return pvpFlow(dt); // also while the host is still on ship select: guests are already duelling
   if (state.mode === 'select') return;
   if (!players.some((p) => p.alive) && state.mode !== 'dead') {
@@ -592,6 +595,19 @@ function flow(dt) {
   if (state.mode === 'pick' && net !== 'solo' && state.t > PICK_TIME) for (const p of players) choose(p, Math.floor(Math.random() * p.cards.length)); // online: an idle pirate gets a random card
   if (state.mode === 'pick' && players.every((p) => !p.cards.length)) { state.mode = 'between'; state.t = 0; }
   if (state.mode === 'between' && state.t > 2.5 && (net === 'solo' || state.wave > 0 || state.go)) startWave(state.wave + 1);
+}
+// quick match, host: a countdown once someone joined (now when every seat is taken and every pirate has a ship), then sail
+const started = () => (mode === 'pvp' ? state.mode === 'pvp' || state.mode === 'over' : state.go || state.wave > 0);
+const QUICK_WAIT = 15; // s
+function quickFlow() {
+  if (!quick || net !== 'host' || !roomOpen || started()) return;
+  const n = room.guests();
+  if (!n) { quickAt = null; return; } // the last guest left: wait for the next one
+  quickAt ??= time + QUICK_WAIT;
+  if (n === MAX_PLAYERS - 1 && players.length === MAX_PLAYERS) quickAt = Math.min(quickAt, time);
+  if (time < quickAt) return banner(`SETTING SAIL IN ${Math.ceil(quickAt - time)}`, 0.3); // rides the snapshot: guests count down too
+  if (!me) choosePlayer(Math.floor(Math.random() * PLAYER_SHIPS.length)); // ponytail: an idle host gets a random ship
+  hostStart();
 }
 // PvP: 'between' (warm-up until the host presses Enter) → 'pvp' → 'over' (Enter: rematch)
 function pvpFlow(dt) {
@@ -963,7 +979,7 @@ function hud() {
   $('room').hidden = net === 'solo';
   if (net !== 'solo') {
     const n = players.length, wait = net === 'host' && (mode === 'coop' ? state.mode === 'between' && state.wave === 0 && !state.go : state.mode !== 'pvp');
-    setHTML($('room'), (net === 'host' ? `ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${n} PIRATES`) +
+    setHTML($('room'), (net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${n} PIRATES`) +
       (wait && me ? `<br><kbd>Enter</kbd> ${mode === 'pvp' ? (state.mode === 'over' ? 'rematch' : 'start the match') : 'set sail'}` : ''));
   }
   if (!me) return;
@@ -1306,7 +1322,29 @@ function online() {
 function offline(msg) {
   room?.close(); // or the abandoned Peer keeps calling back into the next attempt
   for (const s of PREVIEW) if (!ships.includes(s)) ships.push(s); // hostGame took them out of the sim
-  net = 'solo'; mode = 'coop'; room = null; myPid = 0; roomOpen = false; lobbyLock(false); lobbyMsg(msg);
+  clearInterval(quickBeat);
+  net = 'solo'; mode = 'coop'; room = null; myPid = 0; roomOpen = false; quick = quickAt = null; quickTries = 0; lobbyLock(false); lobbyMsg(msg);
+}
+// QUICK CO-OP / QUICK PVP: the server hands out a room code to host or to join (co-op: the GAME button picks the queue)
+function quickGame(m, skip = '', tries = 0) {
+  if (net !== 'solo' || state.mode !== 'select') return;
+  if (typeof Peer === 'undefined') return lobbyMsg('ONLINE UNAVAILABLE (PeerJS did not load)');
+  const q = m === 'pvp' ? 'pvp' : convoy ? 'coop-convoy' : 'coop-waves';
+  lobbyLock(true);
+  lobbyMsg('SEARCHING…');
+  match(q, skip && `&skip=${skip}`).then((r) => {
+    if (r.retry) return setTimeout(() => quickGame(m, '', tries), 1000); // a room is opening: join it once its host is reachable
+    lobbyLock(false); // online() locks it again
+    quick = q;
+    quickTries = tries;
+    if (r.host) hostGame(m, r.host); else joinGame(r.join);
+  }).catch(() => offline('MATCHMAKING UNREACHABLE'));
+}
+// a quick room that could not be hosted or joined: ask again, telling the server to drop that one
+function retryQuick(skip) {
+  const m = quick === 'pvp' ? 'pvp' : 'coop', n = quickTries + 1; // not mode: a guest only learns it from the host's 'hi'
+  offline(n < 3 ? 'SEARCHING…' : 'NO MATCH FOUND, TRY AGAIN');
+  if (n < 3) quickGame(m, skip, n);
 }
 // the lobby's GAME button: waves or convoy, for solo and HOST CO-OP (a guest gets the host's choice in 'hi')
 function setConvoy(on) {
@@ -1314,7 +1352,7 @@ function setConvoy(on) {
   convoy = on;
   $('gm').textContent = on ? 'GAME: CONVOY' : 'GAME: WAVES';
 }
-function hostGame(m) {
+function hostGame(m, code) {
   if (!online()) return;
   net = 'host';
   mode = m;
@@ -1322,7 +1360,15 @@ function hostGame(m) {
   for (const s of PREVIEW) if (ships.includes(s)) ships.splice(ships.indexOf(s), 1); // still on screen, but no target for guests until one is picked
   lobbyMsg('OPENING ROOM…');
   room = hostRoom({
-    open: (code) => { roomOpen = true; lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`); },
+    open: (code) => {
+      roomOpen = true;
+      if (!quick) return lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`);
+      lobbyMsg(`QUICK ${modeName()} · waiting for pirates · keep this tab in front`);
+      // every 10 s, the seats still free; 0 once the game started (the server stops sending guests here)
+      const beat = () => match(quick, `&code=${code}&free=${started() ? 0 : MAX_PLAYERS - 1 - room.guests()}`).catch(() => {});
+      beat();
+      quickBeat = setInterval(beat, 10000);
+    },
     join: (pid) => room.send(pid, { t: 'hi', pid, mode, convoy }),
     msg: (pid, msg) => {
       if (msg.t === 'ship') return addPlayer(pid, msg.i | 0, msg.nick);
@@ -1337,11 +1383,14 @@ function hostGame(m) {
       Object.assign(p, { wrecked: true, isPlayer: false, pid: null }); // their ship goes down and is cleared like any wreck
       damage(p, 1e9);
     },
-    error: (e) => { if (!roomOpen) offline(`COULD NOT OPEN A ROOM (${e.type})`); },
-  });
+    error: (e) => {
+      if (roomOpen) return;
+      if (quick && e.type === 'unavailable-id') return retryQuick(code); // the code is someone's private room
+      offline(`COULD NOT OPEN A ROOM (${e.type})`);
+    },
+  }, code);
 }
-function joinGame() {
-  const code = $('code').value.trim().toUpperCase();
+function joinGame(code = $('code').value.trim().toUpperCase()) {
   if (!/^[A-Z]{4}$/.test(code)) return lobbyMsg('ENTER THE 4-LETTER ROOM CODE');
   if (!online()) return;
   net = 'guest';
@@ -1353,13 +1402,17 @@ function joinGame() {
       else if (m.s && guestShip !== null) applySnap(m);
     },
     close: () => {
-      if (!myPid) return offline('ROOM FULL, CLOSED OR UNREACHABLE');
+      if (!myPid) return quick ? retryQuick(code) : offline('ROOM FULL, CLOSED OR UNREACHABLE');
       hostGone = true;
       banner('HOST LEFT', 3);
       if (state.mode === 'dead') { state.t = Math.max(state.t, 3.1); return; } // run over: let the guest sign the leaderboard and reload themselves
       setTimeout(() => location.reload(), 3000);
     },
-    error: (e) => { if (!myPid) offline(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : `CONNECTION FAILED (${e.type})`); },
+    error: (e) => {
+      if (myPid) return;
+      if (quick) return retryQuick(code);
+      offline(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : `CONNECTION FAILED (${e.type})`);
+    },
   });
 }
 try { $('nick').value = nick(localStorage.getItem('gallion-nick')); } catch {}
@@ -1368,6 +1421,8 @@ $('gm').onclick = (e) => { e.currentTarget.blur(); setConvoy(!convoy); };
 $('host-coop').onclick = (e) => { e.currentTarget.blur(); hostGame('coop'); };
 $('host-pvp').onclick = (e) => { e.currentTarget.blur(); hostGame('pvp'); };
 $('join').onclick = (e) => { e.currentTarget.blur(); joinGame(); };
+$('quick-coop').onclick = (e) => { e.currentTarget.blur(); quickGame('coop'); };
+$('quick-pvp').onclick = (e) => { e.currentTarget.blur(); quickGame('pvp'); };
 
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF

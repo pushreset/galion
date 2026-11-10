@@ -1,4 +1,4 @@
-# Coolify "Docker Compose" resource: TURN relay (coturn) + credential service (ice) for galion
+# Coolify "Docker Compose" resource: TURN relay (coturn) + credential and quick-match service (ice) for galion
 # Env vars to set in Coolify:
 #   PUBLIC_IP   = public IP of the server
 #   TURN_HOST   = domain or public IP clients use to reach coturn
@@ -35,20 +35,55 @@ services:
         source: ./ice.mjs
         target: /app/ice.mjs
         content: |
-          // 1-hour coturn credentials (TURN REST API), for the game's origin only
+          // 1-hour coturn credentials (TURN REST API) and quick-match queues, for the game's origin only
           import { createServer } from 'node:http';
           import { createHmac } from 'node:crypto';
           const { TURN_SECRET, TURN_HOST, ORIGIN } = process.env;
           const hits = new Map(); // ponytail: in-memory per-IP limit, reset every 10 min
           setInterval(() => hits.clear(), 600_000);
+          // Quick match: one open room per queue; the server only hands out room codes, games stay P2P.
+          // ponytail: rooms fill one at a time, in memory (a restart empties the queues, running games go on); region / skill buckets if traffic grows
+          const SEATS = 3; // guests per room: MAX_PLAYERS - 1 in net.js
+          const rooms = { pvp: null, 'coop-waves': null, 'coop-convoy': null }; // { code, free, seen, ready }
+          const newCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
+          // ?q=Q[&skip=CODE] → { host } | { join } | { retry }; ?q=Q&code=CODE&free=N → host heartbeat (N = 0 closes), null
+          function match(q, p) {
+            const now = Date.now(), r = rooms[q], code = p.get('code');
+            if (code) {
+              if (r?.code !== code) return null;
+              const free = Math.max(0, Math.min(SEATS, parseInt(p.get('free'), 10) || 0));
+              if (free) Object.assign(r, { free, seen: now, ready: true }); else rooms[q] = null;
+              return null;
+            }
+            // a guest reports a dead / full room (skip); a host gone quiet; a host that never opened its room
+            if (r && (r.code === p.get('skip') || now - r.seen > (r.ready ? 25_000 : 10_000))) rooms[q] = null;
+            const o = rooms[q];
+            if (o && !o.ready) return { retry: 1 }; // its host is still registering on PeerJS: a guest now would not find it
+            if (o?.free > 0) { o.free--; return { join: o.code }; }
+            // every seat handed out (guests still connecting): open the next room
+            rooms[q] = { code: newCode(), free: SEATS, seen: now, ready: false };
+            return { host: rooms[q].code };
+          }
           createServer((req, res) => {
             if (req.headers.origin !== ORIGIN) { res.writeHead(403).end(); return; }
+            const cors = { 'Access-Control-Allow-Origin': ORIGIN, 'Cache-Control': 'no-store' };
+            const url = new URL(req.url, 'http://x'), q = url.searchParams.get('q');
             const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0];
-            hits.set(ip, (hits.get(ip) || 0) + 1);
-            if (hits.get(ip) > 30) { res.writeHead(429, { 'Access-Control-Allow-Origin': ORIGIN }).end(); return; }
+            if (!(url.pathname === '/match' && url.searchParams.has('code'))) { // heartbeats (every 10 s) don't count
+              hits.set(ip, (hits.get(ip) || 0) + 1);
+              if (hits.get(ip) > 60) { res.writeHead(429, cors).end(); return; }
+            }
+            if (url.pathname === '/match') {
+              if (!Object.hasOwn(rooms, q)) { res.writeHead(400, cors).end(); return; }
+              const m = match(q, url.searchParams);
+              if (!m) { res.writeHead(204, cors).end(); return; }
+              res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(m));
+              return;
+            }
             const username = `${Math.floor(Date.now() / 1000) + 3600}:galion`;
             const credential = createHmac('sha1', TURN_SECRET).update(username).digest('base64');
-            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': ORIGIN, 'Cache-Control': 'no-store' });
+            res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ iceServers: [
               { urls: 'stun:stun.l.google.com:19302' },
               { urls: [`turn:${TURN_HOST}:3478?transport=udp`, `turn:${TURN_HOST}:3478?transport=tcp`], username, credential },
