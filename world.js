@@ -44,10 +44,11 @@ function islandMesh(isl, rand, rings) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }));
+  const m = new THREE.Mesh(g, islandMat);
   m.castShadow = m.receiveShadow = true;
   return m;
 }
+const islandMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }); // shared: map swaps dispose only geometry
 
 export function rock(rand, s, hex = '#9695a0') {
   const g = new THREE.IcosahedronGeometry(1, 0);
@@ -174,13 +175,15 @@ function fort(group, y0, s) {
 }
 
 // Port town: whitewashed houses with tiled roofs and a jetty reaching toward the middle of the map.
-function port(group, isl, rand) {
-  const dir = isl.x < 0 ? 1 : -1, y0 = 0.9;
-  const jetty = stoneBox(11, 0.25, 2.2, dir * (isl.r + 2.5), 0.75, 0, '#8d5c35');
+function port(parent, isl, rand) {
+  const group = new THREE.Group(), y0 = 0.9; // built along +x, then turned toward the map centre
+  group.rotation.y = -Math.atan2(-isl.z, -isl.x);
+  parent.add(group);
+  const jetty = stoneBox(11, 0.25, 2.2, (isl.r + 2.5), 0.75, 0, '#8d5c35');
   group.add(jetty);
-  for (let i = 0; i < 4; i++) for (const sz of [-1, 1]) group.add(stoneBox(0.35, 1.6, 0.35, dir * (isl.r - 1.5 + i * 3), 0.2, sz * 1.1, '#56351f'));
+  for (let i = 0; i < 4; i++) for (const sz of [-1, 1]) group.add(stoneBox(0.35, 1.6, 0.35, (isl.r - 1.5 + i * 3), 0.2, sz * 1.1, '#56351f'));
   for (const [fx, fz, w, h] of [[0.3, -0.42, 3.2, 2.2], [0.1, 0.4, 2.8, 1.9], [-0.25, -0.1, 3.6, 2.6], [0.45, 0.2, 2.4, 1.8]]) {
-    const x = dir * fx * isl.r, z = fz * isl.r;
+    const x = fx * isl.r, z = fz * isl.r;
     group.add(stoneBox(w, h, w * 0.8, x, y0 + h / 2, z, '#f5ecd2'));
     const roof = new THREE.Mesh(new THREE.ConeGeometry(w * 0.78, 1.3, 4), mat('#a52623'));
     roof.position.set(x, y0 + h + 0.65, z);

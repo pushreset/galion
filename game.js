@@ -12,10 +12,9 @@ function ear(x, z) {
   return [Math.max(0, 1 - Math.hypot(dx, dz) / 110), (dx - dz) / Math.SQRT2 / 50];
 }
 import { createRadar } from './radar.js';
-import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
+import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
 
 const VIEW_H = 40; // world units visible vertically
-const viewFar = () => (convoy ? 260 : 215); // overview (C): the whole map fits a 16:9 screen
 const TARGET_PX_H = 300; // internal render height ≈ this; integer upscale to the screen
 const WIND = Math.atan2(0.6, 0.8); // matches water.js swell direction
 const CAM_AZ = Math.PI / 4, CAM_EL = (38 * Math.PI) / 180;
@@ -144,12 +143,12 @@ buildForts();
 function loadMap(name) {
   setMap(name);
   scene.remove(world.root);
-  world.root.traverse((o) => o.geometry?.dispose());
+  world.root.traverse((o) => o.geometry?.dispose()); // materials: shared (ships.js mat() cache, world.js islandMat)
   world = createWorld(scene);
   sea.setMap();
   buildForts();
 }
-const fortsOn = () => convoy || mode === 'pvp' || fortActive(state.wave);
+const fortsOn = () => (convoy && state.wave > 0) || mode === 'pvp' || fortActive(state.wave); // convoy: not before the first convoy sails
 function fortShow(fort, on) {
   for (const t of fort.turrets) t.mesh.visible = on;
   if (fort.flag) fort.flag.visible = on;
@@ -294,7 +293,7 @@ const camTarget = new THREE.Vector3();
 function updateCamera(dt, snapNow) {
   const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // select screen: aim below the row so ships sit above the cards
   const want = overview ? new THREE.Vector3() : new THREE.Vector3(p.x + Math.cos(p.h) * p.speed * 0.9, 0, p.z + Math.sin(p.h) * p.speed * 0.9);
-  const wantH = overview ? viewFar() : VIEW_H;
+  const wantH = overview ? MAP.view : VIEW_H;
   if (viewH !== wantH) {
     viewH = snapNow || Math.abs(wantH - viewH) < 0.05 ? wantH : viewH + (wantH - viewH) * (1 - Math.exp(-6 * dt));
     setProjection();
@@ -394,21 +393,29 @@ function spawnPoint(but) {
     if (ships.some((o) => o !== but && Math.hypot(x - o.x, z - o.z) < 16)) continue;
     return [x, z];
   }
-  return [A.x > 0 ? -BOUNDS.x + 45 : BOUNDS.x - 45, 0]; // clear of the convoy map's ports too
+  return [A.x > 0 ? -BOUNDS.x + 45 : BOUNDS.x - 45, 0]; // clear of the convoy map's port islands (convoyStart slides spawns off a hull here)
 }
 // Merchant route: from a spawn point, past a pirate (±0.4 rad) to the far side of the arena.
 // convoy mode: [from, to] ports of the current convoy (odd convoys sail west → east), and the open water off a port's jetty
 const route = () => { const p = ISLANDS.filter((I) => I.kind === 'port'); return state.wave % 2 ? p : p.reverse(); };
-const mouth = (port) => ({ x: port.x - Math.sign(port.x) * (port.r + 16), z: port.z });
-// escorts alternate two profiles: guards hold a station beside the merchants (sim.js guardSteer), hunters chase the pirates
+const mouth = (port) => { const d = Math.hypot(port.x, port.z) || 1, k = 1 - (port.r + 16) / d; return { x: port.x * k, z: port.z * k }; }; // toward the map centre
+// Where the next convoy ship leaves port, bow toward the far port: the mouth, slid along the coast until no hull is within 12
+// (the last convoy's ships, a pirate camping the mouth).
+function convoyStart() {
+  const [from, to] = route(), a = mouth(from), b = mouth(to), h = Math.atan2(b.z - a.z, b.x - a.x);
+  const free = (d) => !ships.some((o) => o.alive && Math.hypot(a.x - Math.sin(h) * d - o.x, a.z + Math.cos(h) * d - o.z) < 12);
+  const d = [0, 12, -12, 24, -24, 36, -36].find(free) ?? 0; // ponytail: all blocked → the mouth anyway
+  return { x: a.x - Math.sin(h) * d, z: a.z + Math.cos(h) * d, h, dest: b };
+}
+// escorts alternate two profiles: guards hold a station beside a merchant (updateEnemies, sim.js guardSteer), hunters chase the pirates
 function spawnEscort(type) {
-  const [from] = route(), a = mouth(from), h = from.x < 0 ? 0 : Math.PI, n = state.escorts++, side = n & 2 ? -1 : 1;
-  Object.assign(addShip(type, 'navy', 1, a.x, a.z + side * 9, h, 2), { escort: n % 2 ? 'hunter' : 'guard', station: side * 12 * Math.cos(h) });
+  const { x, z, h } = convoyStart();
+  addShip(type, 'navy', 1, x, z, h, 2).escort = state.escorts++ % 2 ? 'hunter' : 'guard';
 }
 function spawnMerchant(m) {
   if (convoy) {
-    const [from, to] = route(), a = mouth(from), h = from.x < 0 ? 0 : Math.PI;
-    addShip(m.type, 'merchant', 2, a.x, a.z, h, 2, Object.assign(makeMerchant(m.type, a.x, a.z, h, m.armed, mouth(to)), { maxAge: Infinity })); // the crossing takes longer than a wave merchant's 100 s
+    const { x, z, h, dest } = convoyStart();
+    addShip(m.type, 'merchant', 2, x, z, h, 2, Object.assign(makeMerchant(m.type, x, z, h, m.armed, dest), { maxAge: 240 })); // a crossing takes ~75 s, more when chased; past 240 s she counts as in port so a stuck merchant can't stall the convoy
     return;
   }
   const [x, z] = spawnPoint(), lx = BOUNDS.x - 12, lz = BOUNDS.z - 12, P = anyAlive() || { x: 0, z: 0 };
@@ -604,13 +611,18 @@ function updateEnemies(dt) {
   if (!players.length) return; // ship select: nobody to shoot at yet
   for (const s of ships) {
     if (s.team !== 1 || !s.alive) continue;
-    const tgt = nearestPlayer(s);
-    let ward = null, wd = Infinity; // a guard's ward: the closest merchant still at sea
-    if (s.escort === 'guard') for (const o of ships) {
-      const d = Math.hypot(o.x - s.x, o.z - s.z);
-      if (o.merchant && o.alive && !o.escaped && d < wd) { wd = d; ward = o; }
+    let tgt = nearestPlayer(s);
+    if (s.escort === 'guard') {
+      // ward: kept until she's gone, then the merchant with the fewest guards (closest on a tie); station: the free side, further out per pair
+      if (!(s.ward?.alive && !s.ward.escaped)) {
+        const n = (o) => ships.filter((g) => g !== s && g.ward === o && g.alive).length;
+        s.ward = ships.filter((o) => o.merchant && o.alive && !o.escaped).sort((a, b) => n(a) - n(b) || Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(b.x - s.x, b.z - s.z))[0];
+        if (s.ward) { const k = n(s.ward); s.station = (k % 2 ? -1 : 1) * (12 + 8 * (k >> 1)); }
+      }
+      const w = s.ward && nearestPlayer(s.ward); // the pirate attacking the ward, not just the one nearest the guard
+      if (w && Math.hypot(w.x - s.ward.x, w.z - s.ward.z) < 45) tgt = w;
     }
-    const side = s.escort === 'guard' ? guardSteer(s, ward, tgt) : aiSteer(s, tgt);
+    const side = s.escort === 'guard' ? guardSteer(s, s.ward, tgt) : aiSteer(s, tgt);
     if (side && !(tgt.smokeT > 0)) fire(s, side); // smoke screen: they can't see you
   }
   for (const s of ships) {

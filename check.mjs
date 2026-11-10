@@ -333,6 +333,9 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   assert.equal(guardSteer(gd, w, lure), 0, 'guard left its ward for a distant pirate');
   assert.notEqual(guardSteer(gd, w, near), 0, 'guard ignored a pirate beside its ward');
   assert.notEqual(guardSteer(gd, null, near), 0, 'a guard with no ward does not hunt');
+  const sniper = makeShip('brig', 0, 0, 47, 0); // 47 from the ward, 27 from a guard off station: in its guns' reach
+  gd.z = 20;
+  assert.notEqual(guardSteer(gd, w, sniper), 0, 'guard never fires back at a pirate shelling it from outside the leash');
   setMap('waves');
   assert.deepEqual(ISLANDS, MAPS.waves.islands);
   assert.equal(BOUNDS.x, 120);

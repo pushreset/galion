@@ -17,9 +17,10 @@ export function shoreR(isl, a) {
 }
 
 // waves: the open square (waves, PvP). convoy: a long channel between two ports, forts guarding the route.
+// view: the overview zoom (game.js, C) that fits the whole map on a 16:9 screen.
 // At most 8 islands per map (water.js shader). setMap swaps ISLANDS / BOUNDS in place, so importers stay valid.
 export const MAPS = {
-  waves: { x: 120, z: 120, islands: [
+  waves: { x: 120, z: 120, view: 215, islands: [
     { x: -38, z: -26, r: 10, ph: 0.4, kind: 'rocky' },
     { x: 46, z: -48, r: 13, ph: 2.1, kind: 'fort' },
     { x: 30, z: 38, r: 7.5, ph: 4.0, kind: 'palm' },
@@ -28,7 +29,7 @@ export const MAPS = {
     { x: 82, z: 30, r: 6, ph: 3.3, kind: 'palm' },
     { x: -86, z: -70, r: 7, ph: 0.9, kind: 'rocky' },
   ] },
-  convoy: { x: 200, z: 70, islands: [
+  convoy: { x: 200, z: 70, view: 260, islands: [
     { x: -188, z: 0, r: 12, ph: 0.7, kind: 'port', name: 'PORT ROYAL' },
     { x: 188, z: 0, r: 12, ph: 3.9, kind: 'port', name: 'TORTUGA' },
     { x: -125, z: -34, r: 12, ph: 2.1, kind: 'fort' },
@@ -40,8 +41,9 @@ export const MAPS = {
   ] },
 };
 export const ISLANDS = [...MAPS.waves.islands];
+export let MAP = MAPS.waves;
 export function setMap(name) {
-  const m = MAPS[name];
+  const m = MAP = MAPS[name];
   ISLANDS.splice(0, Infinity, ...m.islands);
   BOUNDS.x = m.x; BOUNDS.z = m.z;
 }
@@ -283,10 +285,10 @@ function steerTo(s, want) {
 }
 
 // Convoy escort, guard profile: holds a station abeam of its ward (s.station: + starboard, - port) and
-// fights only a pirate within 45 of the ward, so it never gets lured away. Returns a fire side or 0.
+// fights only a pirate within 45 of the ward or in its own gun range, so it never gets lured far. Returns a fire side or 0.
 export function guardSteer(s, ward, tgt) {
   if (!s.alive) return 0;
-  if (!ward || (tgt.alive && Math.hypot(tgt.x - ward.x, tgt.z - ward.z) < 45)) return aiSteer(s, tgt);
+  if (!ward || (tgt.alive && (Math.hypot(tgt.x - ward.x, tgt.z - ward.z) < 45 || Math.hypot(tgt.x - s.x, tgt.z - s.z) < s.range))) return aiSteer(s, tgt);
   const px = ward.x - Math.sin(ward.h) * s.station, pz = ward.z + Math.cos(ward.h) * s.station;
   const dx = px - s.x, dz = pz - s.z, c = Math.cos(ward.h), sn = Math.sin(ward.h);
   if (Math.hypot(dx, dz) > 25) { s.sail = 3; steerTo(s, Math.atan2(dz, dx)); return 0; } // catch up

@@ -76,8 +76,7 @@ export function createRadar(canvas) {
       px(p.x, p.y, 6, o.goal ? '#ffffff' : '#8d5c35');
     }
     for (const fort of forts) {
-      const p = place(fort.x, fort.z);
-      if (p.out) continue;
+      const p = place(fort.x, fort.z); // off the rose: pinned to the rim, pointing the way
       px(p.x, p.y, 6, '#1b110b');
       px(p.x, p.y, 4, fort.active ? '#a52623' : '#6f6f7c');
     }
