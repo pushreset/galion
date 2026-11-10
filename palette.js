@@ -24,6 +24,8 @@ export const PALETTE_HEX = [
   '#173219', '#255022', '#3b762c', '#5f9e38', '#94c54c',
   // iron
   '#1c1e22', '#3a3d44',
+  // kraken purple (ships.js KRAKEN)
+  '#4f1f5f', '#7a3486', '#a552ad',
   // warm haze
   '#e9a46a', '#f3c58e',
 ];

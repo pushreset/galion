@@ -74,6 +74,7 @@ Keys are physical positions, so AZERTY (ZQSD) and QWERTY (WASD) both work. AZERT
 ## Features
 
 - Three player ships, progressive waves, destructible fort, islands that block cannonballs
+- The kraken: a slow sea monster that roams the map in every mode (waves 4, 7, 10…, convoys 3, 6, 9…, PvP a minute in and a minute after each kill). It slams any ship that comes near, pirate, navy or merchant alike: a tentacle rises, then falls where you were heading, so turn or drop sail. It can be killed, but drops no loot; in PvP its sinkings score for nobody
 - Skill bar (4 slots, learn and level up between waves)
 - Merchant convoys, gold pickup with magnet, combo multiplier (×2 to ×5)
 - Boarding: automatic under 20% hull, otherwise a timing QTE; crew losses and recruits

@@ -8,6 +8,8 @@ export const TYPES = {
   galleon: { len: 14, beam: 4.2, hp: 120, speed: 8.5, turn: 0.62, cannons: 5, range: 34, reloadTime: 4.8, gold: 35, aimTol: 0.12, crew: 40 },
   brig: { len: 10.5, beam: 3.3, hp: 70, speed: 10, turn: 0.85, cannons: 3, range: 30, reloadTime: 4.2, gold: 20, aimTol: 0.16, crew: 24 },
   sloop: { len: 8, beam: 2.6, hp: 40, speed: 12, turn: 1.15, cannons: 2, range: 26, reloadTime: 3.6, gold: 10, aimTol: 0.2, crew: 14 },
+  // team 3, allied to nobody: every ship can shoot it and it slams every ship. No guns (range/reload: its tentacles), no crew, no gold.
+  kraken: { len: 10, beam: 8, hp: 400, speed: 3, turn: 0.6, cannons: 0, range: 40, reloadTime: 3, gold: 0, aimTol: 0, crew: 0 },
 };
 
 // Island outline: radius wobbles with angle. Shared by mesh (world.js), water shader
@@ -340,8 +342,40 @@ export function merchantSteer(s, player, dt) {
   return 0;
 }
 
+// --- kraken (team 3) -------------------------------------------------------------
+// Drifts toward s.wander; closes in on the nearest ship within 70, player or not. Returns a slam or null.
+export const SLAM = { t: 1.2, r: 5, dmg: 18 };
+export function krakenSteer(s, ships, rand = Math.random) {
+  if (!s.alive) return null;
+  let tgt = null, bd = 70;
+  for (const o of ships) {
+    const d = Math.hypot(o.x - s.x, o.z - s.z);
+    if (o !== s && o.alive && !o.escaped && o.team !== 3 && d < bd) { bd = d; tgt = o; }
+  }
+  if (!s.wander || Math.hypot(s.wander.x - s.x, s.wander.z - s.z) < 10) s.wander = { x: (rand() * 2 - 1) * (BOUNDS.x - 30), z: (rand() * 2 - 1) * (BOUNDS.z - 30) };
+  const go = tgt && bd > 14 ? tgt : tgt ? null : s.wander; // close enough: hold and slam
+  s.sail = go ? 3 : 0;
+  if (go) steerTo(s, Math.atan2(go.z - s.z, go.x - s.x));
+  else s.turnIn = 0;
+  if (!tgt || bd > s.range || s.reload.port > 0) return null;
+  s.reload.port = s.reloadTime;
+  const lead = SLAM.t * 0.8; // aim where the ship will be: holding course gets you hit, a turn dodges it
+  return { x: tgt.x + Math.cos(tgt.h) * tgt.speed * lead, z: tgt.z + Math.sin(tgt.h) * tgt.speed * lead, t: SLAM.t, r: SLAM.r, dmg: SLAM.dmg };
+}
+// A tentacle rises (telegraph), then comes down: 'slam' once it hits the water, hurting every ship under it.
+export function stepSlam(sl, dt, ships) {
+  if ((sl.t -= dt) > 0) return null;
+  for (const s of ships) {
+    if (!s.alive || s.team === 3 || Math.hypot(s.x - sl.x, s.z - sl.z) > sl.r + s.len * 0.3) continue;
+    s.lastHit = 3; // nobody's kill (PvP)
+    damage(s, sl.dmg);
+    s.slowT = Math.max(s.slowT || 0, 1.5);
+  }
+  return 'slam';
+}
+
 // --- boarding ---------------------------------------------------------------------
-export const canBoard = (p, e) => p.alive && e.alive && e.team !== p.team && !e.isPlayer && e.type !== 'fort' && p.boardCd <= 0 &&
+export const canBoard = (p, e) => p.alive && e.alive && e.team !== p.team && !e.isPlayer && e.type !== 'fort' && e.type !== 'kraken' && p.boardCd <= 0 &&
   Math.hypot(e.x - p.x, e.z - p.z) < (p.len + e.len) * 0.4 + 3;
 // Below 20% hull the enemy strikes her colours; otherwise a melee decided round by round (game.js QTE).
 export const startBoarding = (p, e) => (e.hp < 0.2 * e.maxHp ? { auto: true } : { you: p.crew, you0: p.crew, them: e.crew, start: e.crew, round: 0 });
@@ -407,6 +441,8 @@ export function waveSpec(k, rand = Math.random, mult = 1, extra = 0) {
   return out;
 }
 export const fortActive = (k) => k >= 3;
+// Kraken rounds: waves 4, 7, 10…, convoys 3, 6, 9… (PvP: on a timer, game.js).
+export const krakenDue = (convoy, k) => (convoy ? k >= 3 && k % 3 === 0 : k >= 4 && k % 3 === 1);
 
 // Hull patches itself once nobody has hit the ship for REGEN_DELAY s. regen = fraction of maxHp per second.
 export const REGEN_DELAY = 5;

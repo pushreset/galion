@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PixelPost } from './post.js';
 import { createSea } from './water.js';
-import { buildShip, setGuns } from './ships.js';
+import { buildShip, setGuns, buildTentacle } from './ships.js';
 import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
 import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
@@ -12,7 +12,7 @@ function ear(x, z) {
   return [Math.max(0, 1 - Math.hypot(dx, dz) / 110), (dx - dz) / Math.SQRT2 / 50];
 }
 import { createRadar } from './radar.js';
-import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
+import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, SLAM } from './sim.js';
 
 const VIEW_H = 40; // world units visible vertically
 const TARGET_PX_H = 300; // internal render height ≈ this; integer upscale to the screen
@@ -170,7 +170,7 @@ function fortUp(fort) {
 }
 
 // game flow: fight → lull → pick (upgrade cards) → between → fight … | dead
-const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0, delivered: 0, escorts: 0, port: 0, convoyN: 0 }; // delivered: gold merchants got to port (convoy mode), it pays for more escorts
+const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0, delivered: 0, escorts: 0, port: 0, convoyN: 0, krakenAt: Infinity }; // krakenAt: state.t (waves) / time (PvP) the kraken surfaces // delivered: gold merchants got to port (convoy mode), it pays for more escorts
 
 // input: physical key codes so AZERTY Z/Q/S/D and QWERTY W/A/S/D both work
 const held = new Set();
@@ -332,7 +332,8 @@ function syncShip(s, t, dt) {
   }
   s.mesh.foam.visible = s.alive; // back on when a co-op pirate respawns
   // fire on the deck once below half hull, or while fire shot burns
-  if ((s.burnT > 0 || s.hp < s.maxHp * 0.5) && (s.alive || s.sinkT < 3) && Math.random() < (s.burnT > 0 ? 0.8 : 0.35 + 0.4 * (1 - s.hp / s.maxHp))) {
+  if (s.mesh.arms) s.mesh.arms.forEach((a, i) => (a.rotation.z = Math.sin(t * 1.8 + i * 1.3) * 0.3)); // kraken arms writhe
+  if ((s.burnT > 0 || (s.hp < s.maxHp * 0.5 && !s.mesh.arms)) && (s.alive || s.sinkT < 3) && Math.random() < (s.burnT > 0 ? 0.8 : 0.35 + 0.4 * (1 - s.hp / s.maxHp))) {
     _v.set((Math.random() - 0.5) * s.len * 0.7, 1.8, (Math.random() - 0.5) * s.beam * 0.6);
     body.localToWorld(_v);
     fx.burn(_v.x, _v.y, _v.z);
@@ -437,6 +438,7 @@ function startWave(k) {
   state.queue = waveSpec(k, Math.random, 1 + 0.6 * (players.length - 1), convoy ? state.delivered / 60 : 0); // ships join one at a time (flow), never the whole wave at once
   state.merchants = convoy ? convoySpec(k).map((m, i) => ({ ...m, at: i * 4 })) : merchantSpec(k).map((m, i) => ({ ...m, at: 5 + i * 15 }));
   state.convoyN = state.merchants.length;
+  state.krakenAt = krakenDue(convoy, k) ? 15 : Infinity;
   let rebuilt = false;
   for (const f of forts) if (!f.alive && k >= f.backAt) { fortUp(f); rebuilt = true; }
   const [from, to] = route();
@@ -524,8 +526,10 @@ function hostStart() {
   if (state.mode === 'pvp' || !me) return;
   state.mode = 'pvp';
   state.left = 300;
-  for (const k of kegs) scene.remove(k.mesh); // nothing fired or dropped last match scores in this one
-  kegs.length = pending.length = flying.length = 0;
+  for (const k of [...kegs, ...slams]) scene.remove(k.mesh); // nothing fired or dropped last match scores in this one
+  kegs.length = slams.length = pending.length = flying.length = 0;
+  diveKraken();
+  state.krakenAt = time + 60;
   for (const p of players) { // every match starts from the stock ship: last match's refits don't carry over
     Object.assign(p, makePlayer(p.pick), { team: p.team, kills: 0 });
     setGuns(p.mesh, p.cannons);
@@ -555,11 +559,14 @@ function flow(dt) {
     state.nextAt += convoy ? 4 : 7;
   }
   while (state.mode === 'fight' && state.merchants[0]?.at <= state.t) spawnMerchant(state.merchants.shift());
+  if (state.mode === 'fight' && state.t >= state.krakenAt) { state.krakenAt = Infinity; spawnKraken(); }
   // waves: the navy is sunk. convoy: no merchant left at sea (sunk, captured or in port), whatever is left of the escort
   const cleared = convoy ? !state.merchants.length && !ships.some((o) => o.merchant && o.alive && !o.escaped)
     : !state.queue.length && !ships.some((o) => o.team === 1 && o.alive);
   if (state.mode === 'fight' && cleared) {
     if (convoy) for (const o of ships) if (o.team === 1 && o.alive) o.escaped = true; // the escort's job is over: it sails off (removed like a merchant that got away)
+    diveKraken(); // nothing slams the crew during repairs
+    state.krakenAt = Infinity;
     state.mode = 'lull';
     state.merchants = [];
     state.queue = [];
@@ -600,6 +607,7 @@ function pvpFlow(dt) {
   }
   for (const f of forts) if (!f.alive && time >= f.upAt) fortUp(f);
   if (state.mode !== 'pvp') return;
+  if (time >= state.krakenAt) { state.krakenAt = Infinity; spawnKraken(); } // a minute into the match, then a minute after each kill
   state.left -= dt;
   const [top, second] = [...players].sort((a, b) => b.kills - a.kills);
   if (!top) return;
@@ -641,6 +649,7 @@ function updateEnemies(dt) {
     }
     else if (r) fire(s, r);
   }
+  for (const s of ships) if (s.type === 'kraken') { const sl = krakenSteer(s, ships); if (sl) addSlam(sl); }
   if (!fortsOn() || state.mode === 'dead') return;
   for (const t of forts.flatMap((f) => (f.alive ? f.turrets : []))) {
     const b = fireTurret(t, nearestPlayer(t), dt);
@@ -682,6 +691,49 @@ function updateKegs(dt) {
     }
     scene.remove(k.mesh);
     kegs.splice(i, 1);
+  }
+}
+
+// --- kraken (sim.js team 3): roams, slams any ship near it, player or not; no loot ----
+function spawnKraken() {
+  const [x, z] = spawnPoint(), P = nearestPlayer({ x, z }) || { x: 0, z: 0 };
+  const k = addShip('kraken', 'kraken', 3, x, z, Math.atan2(P.z - z, P.x - x), 0);
+  for (let i = 0; i < 3; i++) fx.splash(k.x + Math.random() * 6 - 3, k.z + Math.random() * 6 - 3);
+  sound('splash', k.x, k.z, 1.5);
+  if (mode !== 'pvp' || state.banner <= 0) banner('THE KRAKEN RISES', 2.5);
+}
+function diveKraken() {
+  for (const o of ships) if (o.type === 'kraken' && o.alive) { o.escaped = true; fx.splash(o.x, o.z); } // removed like a merchant that got away
+}
+function krakenSlain(k) {
+  for (let i = 0; i < 4; i++) fx.splash(k.x + Math.random() * 8 - 4, k.z + Math.random() * 8 - 4);
+  if (mode === 'pvp') state.krakenAt = time + 60;
+  if (mode !== 'pvp' || state.banner <= 0) banner('THE KRAKEN IS SLAIN', 2.5);
+}
+const slams = [];
+function slamMesh() { const m = buildTentacle(); m.rotation.y = Math.random() * 6.28; scene.add(m); return m; }
+function addSlam(sl) {
+  Object.assign(sl, { id: nextId++, mesh: slamMesh() });
+  slams.push(sl);
+  sound('splash', sl.x, sl.z, 0.6);
+}
+// telegraph: a ring of bubbles the size of the hit, the arm rises out of it, then whips down over the last quarter
+function drawSlam(sl) {
+  const k = Math.max(0, sl.t) / SLAM.t; // 1 → 0
+  const arm = sl.mesh.userData.arm;
+  sl.mesh.position.set(sl.x, -0.3, sl.z);
+  arm.scale.y = Math.min(1, (1 - k) * 2.5) + 0.01;
+  arm.rotation.z = k > 0.25 ? 0.25 : -1.4 + (k / 0.25) * 1.65;
+  if (Math.random() < 0.6) { const a = Math.random() * 6.28; wakes.spawn(sl.x + Math.cos(a) * sl.r, sl.z + Math.sin(a) * sl.r, 0.7, 0, 0, 0.8); }
+}
+function updateSlams(dt) {
+  for (let i = slams.length - 1; i >= 0; i--) {
+    const sl = slams[i];
+    if (!stepSlam(sl, dt, ships)) { drawSlam(sl); continue; }
+    for (let j = 0; j < 3; j++) fx.splash(sl.x + Math.random() * 4 - 2, sl.z + Math.random() * 4 - 2);
+    sound('boom', sl.x, sl.z, 0.8, 0.35);
+    scene.remove(sl.mesh);
+    slams.splice(i, 1);
   }
 }
 
@@ -866,7 +918,7 @@ function step(dt) {
     stepShip(s, dt);
     syncShip(s, time, dt);
     // flag, not a before/after check: balls, rams and kegs sink ships outside this loop
-    if (!s.alive && !s.wrecked) { s.wrecked = true; sound('sink', s.x, s.z); if (s.isPlayer) pirateSunk(s); else dropLoot(s, comboKill(s.x, s.z)); }
+    if (!s.alive && !s.wrecked) { s.wrecked = true; sound('sink', s.x, s.z); if (s.isPlayer) pirateSunk(s); else if (s.type === 'kraken') krakenSlain(s); else dropLoot(s, comboKill(s.x, s.z)); }
     // ponytail: every enemy wreck counts as the crew's kill (no killer tracking); navy and merchants are allied (sim.js), so it holds
   }
   for (const r of collideShips(ships)) { fx.hit(r.x, 1.5, r.z); sound('hit', r.x, r.z); if (r.a === me || r.b === me) shake = Math.max(shake, 0.25); }
@@ -880,6 +932,7 @@ function step(dt) {
   }
   updateLoot(dt);
   updateKegs(dt);
+  updateSlams(dt);
   for (const fort of forts) if (!fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len); // ruins smoulder
   for (const p of players) if (p.smokeT > 0 && Math.random() < 0.5) fx.cloud(p.x, p.z);
   updateBalls(dt);
@@ -936,7 +989,7 @@ function hud() {
     if ((s === me && net === 'solo') || (s !== me && s.team === 0 && !s.isPlayer)) { if (s.bar) s.bar.hidden = true; continue; } // a crewmate who left: no frozen bar
     if (!s.bar) {
       s.bar = document.createElement('div');
-      s.bar.className = s === me ? 'ebar self' : s.isPlayer ? (s.team === me.team ? 'ebar p' : 'ebar e') : s.merchant ? 'ebar m' : 'ebar';
+      s.bar.className = s === me ? 'ebar self' : s.isPlayer ? (s.team === me.team ? 'ebar p' : 'ebar e') : s.merchant ? 'ebar m' : s.type === 'kraken' ? 'ebar k' : 'ebar';
       s.bar.innerHTML = '<i></i>';
       $('bars').append(s.bar);
     }
@@ -1094,6 +1147,7 @@ function snap() {
     b: flying.map((b) => [b.id, b.x, b.y, b.z]),
     l: loot.map((o) => [o.id, o.x, o.z, o.life]),
     k: kegs.map((k) => [k.id, k.x, k.z]),
+    j: slams.map((o) => [o.id, o.x, o.z, o.t]),
     f: forts.map((f) => [f.hp, f.alive, f.turrets.map((t) => t.aim)]),
     g: { mode: state.mode, wave: state.wave, gold: state.gold, delivered: state.delivered, t: state.t, left: state.left, banner: state.banner > 0 ? state.bannerText : '', bt: state.banner, combo: [combo.n, combo.t] },
     e: events.splice(0),
@@ -1101,9 +1155,9 @@ function snap() {
 }
 
 // Guests draw one snapshot interval behind: each value glides from where it is drawn now (_a) to the latest snapshot (_b).
-const SK = ['x', 'z', 'h', 'speed', 'turnRate', 'sinkT'], BK = ['x', 'y', 'z'], LK = ['x', 'z', 'life'], KK = ['x', 'z'];
+const SK = ['x', 'z', 'h', 'speed', 'turnRate', 'sinkT'], BK = ['x', 'y', 'z'], LK = ['x', 'z', 'life'], KK = ['x', 'z'], JK = ['x', 'z', 't'];
 let snapAt = 0, snapGap = SNAP_DT * 1000, lastBanner = '', lastIn = '', hostGone = false;
-const byId = new Map(), ballById = new Map(), lootById = new Map(), kegById = new Map();
+const byId = new Map(), ballById = new Map(), lootById = new Map(), kegById = new Map(), slamById = new Map();
 function track(o, keys, v, fresh) { o._a = fresh ? v : keys.map((k) => o[k]); o._b = v; }
 function mix(o, keys, a) {
   keys.forEach((k, i) => {
@@ -1179,6 +1233,7 @@ function applySnap(m) {
   syncList(flying, ballById, m.b, BK, () => ({}));
   syncList(loot, lootById, m.l, LK, () => ({ mesh: barrelMesh(), seed: Math.random() * 6 }));
   syncList(kegs, kegById, m.k, KK, () => ({ mesh: kegMesh() }));
+  syncList(slams, slamById, m.j || [], JK, () => ({ mesh: slamMesh(), r: SLAM.r }));
   (m.f || []).forEach(([hp, alive, aims], i) => {
     const fort = forts[i];
     if (!fort) return;
@@ -1225,6 +1280,7 @@ function guestStep(dt) {
   drawBalls();
   for (const o of loot) { mix(o, LK, a); bobLoot(o); }
   for (const k of kegs) { mix(k, KK, a); k.mesh.position.set(k.x, 0.2 + Math.sin(time * 2 + k.id) * 0.1, k.z); }
+  for (const sl of slams) { mix(sl, JK, a); drawSlam(sl); }
   for (const fort of forts) if (!fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len);
   for (const p of players) if (p.smokeT > 0 && Math.random() < 0.5) fx.cloud(p.x, p.z);
   if (state.mode === 'dead' && me) gameOver();
@@ -1314,7 +1370,7 @@ $('join').onclick = (e) => { e.currentTarget.blur(); joinGame(); };
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
 window.__game = {
-  get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, get forts() { return forts; }, setConvoy, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
+  get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
   killWave: () => (state.queue = []) && ships.filter((o) => o.team === 1).forEach((o) => damage(o, 1e9)),
   startWave,
   advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); post.render(scene, camera); },

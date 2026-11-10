@@ -205,7 +205,8 @@ export function setGuns(mesh, n) {
     }
   }
 }
-export function buildShip(type, livery, ports = SPECS[type].ports) {
+export function buildShip(type, livery, ports = SPECS[type]?.ports) {
+  if (type === 'kraken') return buildKraken();
   const sp = SPECS[type], lv = LIVERIES[livery];
   const { L, B, D } = sp;
   const root = new THREE.Group();
@@ -344,4 +345,57 @@ function foamRing(sp) {
   const m = new THREE.Mesh(g, mat('#f4fffb', { basic: true, side: THREE.DoubleSide }));
   m.name = 'foam';
   return m;
+}
+
+// Kraken (sim.js team 3): a head breaking the surface, eyes forward (+x), arm tips curling out of the water around it.
+// Same shape as a ship mesh ({root, body, flag, foam, rigs…}) so game.js syncShip drives it; arms sway there.
+export const KRAKEN = ['#4f1f5f', '#7a3486', '#a552ad']; // palette.js
+export function buildKraken() {
+  const root = new THREE.Group(), body = new THREE.Group();
+  root.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(3.2, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(KRAKEN[1]));
+  head.scale.set(1.25, 1.1, 1);
+  head.castShadow = true;
+  body.add(head);
+  const crown = new THREE.Mesh(new THREE.ConeGeometry(1.6, 2.6, 7), mat(KRAKEN[2]));
+  crown.position.set(-1.6, 3.4, 0);
+  crown.rotation.z = 0.7;
+  crown.castShadow = true;
+  body.add(crown);
+  for (const z of [-1.3, 1.3]) {
+    body.add(box(0.5, 0.9, 0.9, '#ffd24a', 3.5, 1.4, z, { basic: true }));
+    body.add(box(0.2, 0.6, 0.3, '#121219', 3.8, 1.4, z));
+  }
+  const arms = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.5, arm = new THREE.Group();
+    arm.position.set(Math.cos(a) * 5, 0, Math.sin(a) * 5);
+    arm.rotation.y = -a;
+    for (let k = 0; k < 3; k++) { // three tapering segments, each bent a bit more: a curl
+      const seg = cyl(0.55 - k * 0.15, 0.7 - k * 0.15, 1.6, KRAKEN[k === 2 ? 2 : 1]);
+      seg.position.set(k * 0.5, 0.6 + k * 1.3, 0);
+      seg.rotation.z = -0.25 - k * 0.35;
+      arm.add(seg);
+    }
+    body.add(arm);
+    arms.push(arm);
+  }
+  const foam = new THREE.Mesh(new THREE.RingGeometry(3.6, 4.4, 16).rotateX(-Math.PI / 2).translate(0, 0.05, 0), mat('#f4fffb', { basic: true, side: THREE.DoubleSide }));
+  root.add(foam);
+  return { root, body, flag: new THREE.Object3D(), foam, sails: [], rigs: [], arms, guns: new THREE.Group(), spec: { L: 10, B: 8, D: 1 } };
+}
+// One tentacle slam (game.js): the group sits on the target spot; the arm (userData.arm) rises 7 units off it
+// and pivots at its base (rotation.z < 0) to fall across the spot.
+export function buildTentacle() {
+  const g = new THREE.Group(), arm = new THREE.Group();
+  arm.position.x = -7;
+  for (let k = 0; k < 4; k++) {
+    const seg = cyl(0.9 - k * 0.2, 1.15 - k * 0.2, 2.6, KRAKEN[Math.min(2, k)]);
+    seg.position.set(k * 0.35, 1.3 + k * 2.4, 0);
+    seg.rotation.z = -0.12 * k;
+    arm.add(seg);
+  }
+  g.add(arm);
+  g.userData.arm = arm;
+  return g;
 }
