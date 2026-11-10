@@ -1,6 +1,6 @@
 // node check.mjs — asserts on the pure sim.
 import assert from 'node:assert/strict';
-import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
+import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
 
 const r0 = () => 0.5; // deterministic: no spread
 
@@ -287,6 +287,58 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   const tgt = makeShip('galleon', 11, 0, 26, 0);
   for (const ball of fireBroadside(a, 1, r)) for (let i = 0; i < 400; i++) if (stepBall(ball, 1 / 60, [a, tgt])) break;
   assert.equal(tgt.lastHit, 10, 'no kill credit');
+}
+// convoy mode: spec ramp, delivered gold buys escorts, navy + merchants allied, guards hold station, the crossing
+{
+  assert.equal(convoySpec(1).length, 2);
+  for (let k = 2; k <= 30; k++) assert.ok(convoySpec(k).length >= convoySpec(k - 1).length && convoySpec(k).length <= 5);
+  for (let i = 0; i < 50; i++) {
+    for (const m of convoySpec(2)) assert.ok(m.type === 'sloop' && !m.armed);
+    for (const m of convoySpec(4)) assert.ok(m.type !== 'galleon' && m.armed);
+  }
+  const r = () => 0; // always the cheapest ship: one sloop per budget point
+  assert.deepEqual(waveSpec(3, r, 1, 0), waveSpec(3, r));
+  assert.equal(waveSpec(3, r, 1, 2).length, waveSpec(3, r).length + 2, 'delivered gold buys no escort');
+  assert.equal(waveSpec(3, r, 1, 99).length, 8, 'escort cap');
+  // allies: a navy broadside passes through a merchant, and they bump without ram damage
+  const navy = makeShip('brig', 1, 0, 0, 0), mer = makeMerchant('brig', 0, 8, 0, false, { x: 100, z: 0 }), pir = makeShip('brig', 0, 0, 16, 0);
+  for (const ball of fireBroadside(navy, 1, () => 0.5)) for (let i = 0; i < 400; i++) if (stepBall(ball, 1 / 60, [navy, mer, pir])) break;
+  assert.equal(mer.hp, mer.maxHp, 'navy shot its own merchant');
+  assert.ok(pir.hp < pir.maxHp, 'the broadside missed the pirate behind');
+  const a = makeShip('brig', 1, 0, 0, 0), b = makeMerchant('brig', 5, 0, Math.PI, false, { x: -100, z: 0 });
+  a.speed = b.speed = 8;
+  assert.equal(collideShips([a, b]).length, 0);
+  assert.equal(a.hp + b.hp, a.maxHp + b.maxHp, 'escort rammed its merchant');
+  // the convoy map: a merchant crosses port to port clear of every island, its guard stays alongside
+  setMap('convoy');
+  assert.ok(ISLANDS.length <= 8 && BOUNDS.x === 200 && BOUNDS.z === 70);
+  const [from, to] = ISLANDS.filter((I) => I.kind === 'port');
+  assert.ok(from.name && to.name && ISLANDS.some((I) => I.kind === 'fort'));
+  const far = makeShip('brig', 0, 999, 999, 0);
+  const m = Object.assign(makeMerchant('galleon', from.x + 28, 0, 0, false, { x: to.x - 28, z: 0 }), { maxAge: Infinity, sail: 2 });
+  const g = Object.assign(makeShip('brig', 1, from.x + 28, 9, 0), { station: 12 });
+  let ev = 0, t = 0;
+  for (; t < 60 * 400 && ev !== 'escaped'; t++) {
+    ev = merchantSteer(m, far, 1 / 60);
+    assert.equal(guardSteer(g, m, far), 0, 'guard fired at nobody');
+    stepShip(m, 1 / 60); stepShip(g, 1 / 60);
+    for (const I of ISLANDS) assert.ok(Math.hypot(m.x - I.x, m.z - I.z) > I.r * 0.85, 'merchant inside island');
+    if (t > 600) assert.ok(Math.hypot(g.x - m.x, g.z - m.z) < 22, 'guard lost its ward');
+  }
+  assert.equal(ev, 'escaped', 'the convoy never made port');
+  // the leash: a pirate far from the ward is ignored, one beside it is fought
+  const w = makeMerchant('brig', 0, 0, 0, false, { x: 150, z: 0 }), gd = Object.assign(makeShip('brig', 1, 0, 12, 0), { station: 12 });
+  const lure = makeShip('brig', 0, 0, 12 + 20, 0), near = makeShip('brig', 0, 0, 12 + 15, 0);
+  lure.x = 60; // within the guard's guns' reach of nothing: 60 from the ward
+  assert.equal(guardSteer(gd, w, lure), 0, 'guard left its ward for a distant pirate');
+  assert.notEqual(guardSteer(gd, w, near), 0, 'guard ignored a pirate beside its ward');
+  assert.notEqual(guardSteer(gd, null, near), 0, 'a guard with no ward does not hunt');
+  const sniper = makeShip('brig', 0, 0, 47, 0); // 47 from the ward, 27 from a guard off station: in its guns' reach
+  gd.z = 20;
+  assert.notEqual(guardSteer(gd, w, sniper), 0, 'guard never fires back at a pirate shelling it from outside the leash');
+  setMap('waves');
+  assert.deepEqual(ISLANDS, MAPS.waves.islands);
+  assert.equal(BOUNDS.x, 120);
 }
 // net.js against a fake Peer: joins that overlap (all offers in before any channel opens) can't pass the cap
 {

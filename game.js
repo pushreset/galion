@@ -12,10 +12,9 @@ function ear(x, z) {
   return [Math.max(0, 1 - Math.hypot(dx, dz) / 110), (dx - dz) / Math.SQRT2 / 50];
 }
 import { createRadar } from './radar.js';
-import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, ARENA, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
+import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
 
 const VIEW_H = 40; // world units visible vertically
-const VIEW_FAR = 215; // overview (C): the whole ±ARENA diamond fits a 16:9 screen
 const TARGET_PX_H = 300; // internal render height ≈ this; integer upscale to the screen
 const WIND = Math.atan2(0.6, 0.8); // matches water.js swell direction
 const CAM_AZ = Math.PI / 4, CAM_EL = (38 * Math.PI) / 180;
@@ -66,7 +65,7 @@ scene.add(sun, sun.target);
 
 const sea = createSea();
 scene.add(sea.mesh);
-const world = createWorld(scene);
+let world = createWorld(scene);
 const wakes = createWakes(scene);
 const fx = createFx(scene, wakes);
 
@@ -74,6 +73,9 @@ const fx = createFx(scene, wakes);
 // net: 'solo' | 'host' (runs the sim, broadcasts snapshots) | 'guest' (sends input, renders snapshots).
 // mode: 'coop' (waves) | 'pvp' (arena). The host records one-shot effects (hits, splashes, muzzle
 // flashes, popups, placed sounds) as events for guests; everything else guests read from the snapshot itself.
+// convoy: co-op / solo variant on its own map (sim.js MAPS.convoy): hunt escorted merchants sailing port to port.
+let convoy = false;
+const modeName = () => (mode === 'pvp' ? 'PVP' : convoy ? 'CONVOY' : 'CO-OP');
 let net = 'solo', mode = 'coop', room = null, myPid = 0, roomOpen = false; // roomOpen: the host's room got its code
 const events = [];
 for (const k of ['hit', 'splash', 'muzzle']) {
@@ -122,38 +124,53 @@ function nearestPlayer(o) {
 }
 const anyAlive = (but) => { const a = players.filter((p) => p.alive && p !== but); return a[Math.floor(Math.random() * a.length)]; };
 
-// fort cannons → turrets (positions from the meshes world.js built)
-scene.updateMatrixWorld(true);
-const turrets = world.forts.flatMap((f) => f.cannons.map((c) => {
-  const p = c.getWorldPosition(new THREE.Vector3());
-  return Object.assign(makeTurret(p.x, p.y + 0.4, p.z), { mesh: c });
-}));
-// one destructible fort: walls ±4.2·scale plus towers; razed it stays down for 3 waves
-const fortW = world.forts[0];
-const fort = fortW && makeFort(fortW.isl.x, fortW.isl.z, (4.2 * fortW.isl.r) / 13 + 1);
-const fortFlag = fortW?.group.children.find((o) => o.geometry?.type === 'CylinderGeometry' && o.geometry.parameters.radiusTop === 0.06);
-function fortShow(on) {
-  for (const t of turrets) t.mesh.visible = on;
-  if (fortFlag) fortFlag.visible = on;
+// destructible forts: walls ±4.2·scale plus towers, cannons → turrets (positions from the meshes world.js built);
+// razed, a fort stays down for 3 waves
+let forts = [];
+function buildForts() {
+  for (const f of forts) f.bar?.remove();
+  scene.updateMatrixWorld(true);
+  forts = world.forts.map((w) => Object.assign(makeFort(w.isl.x, w.isl.z, (4.2 * w.isl.r) / 13 + 1), {
+    turrets: w.cannons.map((c) => {
+      const p = c.getWorldPosition(new THREE.Vector3());
+      return Object.assign(makeTurret(p.x, p.y + 0.4, p.z), { mesh: c });
+    }),
+    flag: w.group.children.find((o) => o.geometry?.type === 'CylinderGeometry' && o.geometry.parameters.radiusTop === 0.06),
+  }));
 }
-function fortDown() {
+buildForts();
+// swap the map (sim.js MAPS): islands, shoreline shader, forts
+function loadMap(name) {
+  setMap(name);
+  scene.remove(world.root);
+  world.root.traverse((o) => o.geometry?.dispose()); // materials: shared (ships.js mat() cache, world.js islandMat)
+  world = createWorld(scene);
+  sea.setMap();
+  buildForts();
+}
+const fortsOn = () => (convoy && state.wave > 0) || mode === 'pvp' || fortActive(state.wave); // convoy: not before the first convoy sails
+function fortShow(fort, on) {
+  for (const t of fort.turrets) t.mesh.visible = on;
+  if (fort.flag) fort.flag.visible = on;
+}
+function fortDown(fort) {
   fort.backAt = state.wave + 3;
   fort.upAt = time + 60; // PvP has no waves: rebuilt after a minute
   const gold = pay(fort.x, fort.z, fort.gold * comboKill(fort.x, fort.z));
-  fortShow(false);
+  fortShow(fort, false);
   for (let i = 0; i < 10; i++) fx.hit(fort.x + (Math.random() - 0.5) * fort.len, 5 + Math.random() * 2, fort.z + (Math.random() - 0.5) * fort.len);
   sound('sink', fort.x, fort.z);
   sound('boom', fort.x, fort.z);
   shake = Math.max(shake, 0.5);
   banner(gold ? `FORT DESTROYED · +${gold} GOLD` : 'FORT DESTROYED', 2.5);
 }
-function fortUp() {
+function fortUp(fort) {
   Object.assign(fort, { hp: fort.maxHp, alive: true });
-  fortShow(true);
+  fortShow(fort, true);
 }
 
 // game flow: fight → lull → pick (upgrade cards) → between → fight … | dead
-const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0 };
+const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0, delivered: 0, escorts: 0, port: 0, convoyN: 0 }; // delivered: gold merchants got to port (convoy mode), it pays for more escorts
 
 // input: physical key codes so AZERTY Z/Q/S/D and QWERTY W/A/S/D both work
 const held = new Set();
@@ -276,7 +293,7 @@ const camTarget = new THREE.Vector3();
 function updateCamera(dt, snapNow) {
   const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // select screen: aim below the row so ships sit above the cards
   const want = overview ? new THREE.Vector3() : new THREE.Vector3(p.x + Math.cos(p.h) * p.speed * 0.9, 0, p.z + Math.sin(p.h) * p.speed * 0.9);
-  const wantH = overview ? VIEW_FAR : VIEW_H;
+  const wantH = overview ? MAP.view : VIEW_H;
   if (viewH !== wantH) {
     viewH = snapNow || Math.abs(wantH - viewH) < 0.05 ? wantH : viewH + (wantH - viewH) * (1 - Math.exp(-6 * dt));
     setProjection();
@@ -368,22 +385,43 @@ function banner(text, dur = 2.5, local = false) {
 function spawnPoint(but) {
   const A = anyAlive(but) || { x: 0, z: 0 }, others = players.filter((p) => p.alive && p !== but);
   for (let i = 0; i < 80; i++) {
-    const a = Math.random() * Math.PI * 2, r = 55 + Math.random() * 20, lim = ARENA - 12;
-    const x = Math.max(-lim, Math.min(lim, A.x + Math.cos(a) * r));
-    const z = Math.max(-lim, Math.min(lim, A.z + Math.sin(a) * r));
+    const a = Math.random() * Math.PI * 2, r = 55 + Math.random() * 20, lx = BOUNDS.x - 12, lz = BOUNDS.z - 12;
+    const x = Math.max(-lx, Math.min(lx, A.x + Math.cos(a) * r));
+    const z = Math.max(-lz, Math.min(lz, A.z + Math.sin(a) * r));
     if (others.some((p) => Math.hypot(x - p.x, z - p.z) < 45)) continue;
     if (ISLANDS.some((I) => Math.hypot(x - I.x, z - I.z) < I.r + 10)) continue;
     if (ships.some((o) => o !== but && Math.hypot(x - o.x, z - o.z) < 16)) continue;
     return [x, z];
   }
-  return [A.x > 0 ? -ARENA + 15 : ARENA - 15, 0];
+  return [A.x > 0 ? -BOUNDS.x + 45 : BOUNDS.x - 45, 0]; // clear of the convoy map's port islands (convoyStart slides spawns off a hull here)
 }
 // Merchant route: from a spawn point, past a pirate (±0.4 rad) to the far side of the arena.
+// convoy mode: [from, to] ports of the current convoy (odd convoys sail west → east), and the open water off a port's jetty
+const route = () => { const p = ISLANDS.filter((I) => I.kind === 'port'); return state.wave % 2 ? p : p.reverse(); };
+const mouth = (port) => { const d = Math.hypot(port.x, port.z) || 1, k = 1 - (port.r + 16) / d; return { x: port.x * k, z: port.z * k }; }; // toward the map centre
+// Where the next convoy ship leaves port, bow toward the far port: the mouth, slid along the coast until no hull is within 12
+// (the last convoy's ships, a pirate camping the mouth).
+function convoyStart() {
+  const [from, to] = route(), a = mouth(from), b = mouth(to), h = Math.atan2(b.z - a.z, b.x - a.x);
+  const free = (d) => !ships.some((o) => o.alive && Math.hypot(a.x - Math.sin(h) * d - o.x, a.z + Math.cos(h) * d - o.z) < 12);
+  const d = [0, 12, -12, 24, -24, 36, -36].find(free) ?? 0; // ponytail: all blocked → the mouth anyway
+  return { x: a.x - Math.sin(h) * d, z: a.z + Math.cos(h) * d, h, dest: b };
+}
+// escorts alternate two profiles: guards hold a station beside a merchant (updateEnemies, sim.js guardSteer), hunters chase the pirates
+function spawnEscort(type) {
+  const { x, z, h } = convoyStart();
+  addShip(type, 'navy', 1, x, z, h, 2).escort = state.escorts++ % 2 ? 'hunter' : 'guard';
+}
 function spawnMerchant(m) {
-  const [x, z] = spawnPoint(), lim = ARENA - 12, P = anyAlive() || { x: 0, z: 0 };
+  if (convoy) {
+    const { x, z, h, dest } = convoyStart();
+    addShip(m.type, 'merchant', 2, x, z, h, 2, Object.assign(makeMerchant(m.type, x, z, h, m.armed, dest), { maxAge: 240 })); // a crossing takes ~75 s, more when chased; past 240 s she counts as in port so a stuck merchant can't stall the convoy
+    return;
+  }
+  const [x, z] = spawnPoint(), lx = BOUNDS.x - 12, lz = BOUNDS.z - 12, P = anyAlive() || { x: 0, z: 0 };
   const a = Math.atan2(P.z - z, P.x - x) + (Math.random() < 0.5 ? -0.4 : 0.4);
   const r = Math.hypot(P.x - x, P.z - z) * 1.4 + 20;
-  const dest = { x: Math.max(-lim, Math.min(lim, x + Math.cos(a) * r)), z: Math.max(-lim, Math.min(lim, z + Math.sin(a) * r)) };
+  const dest = { x: Math.max(-lx, Math.min(lx, x + Math.cos(a) * r)), z: Math.max(-lz, Math.min(lz, z + Math.sin(a) * r)) };
   const h = Math.atan2(dest.z - z, dest.x - x);
   addShip(m.type, 'merchant', 2, x, z, h, 2, makeMerchant(m.type, x, z, h, m.armed, dest));
   if (m.escort) addShip('brig', 'navy', 1, x - Math.sin(h) * 9, z + Math.cos(h) * 9, h, 2);
@@ -392,13 +430,17 @@ function spawnMerchant(m) {
 function startWave(k) {
   state.wave = k;
   state.mode = 'fight';
-  state.t = state.nextAt = 0;
+  state.t = 0;
+  state.nextAt = convoy ? 2 : 0; // convoy: escorts leave port between two merchants
+  state.escorts = state.port = 0;
   sfx.bell();
-  state.queue = waveSpec(k, Math.random, 1 + 0.6 * (players.length - 1)); // ships join one at a time (flow), never the whole wave at once
-  state.merchants = merchantSpec(k).map((m, i) => ({ ...m, at: 5 + i * 15 }));
-  const rebuilt = fort && !fort.alive && k >= fort.backAt;
-  if (rebuilt) fortUp();
-  banner(rebuilt ? `WAVE ${k} · THE FORT IS REBUILT` : fortActive(k) && k === 3 ? `WAVE ${k} · THE FORT OPENS FIRE` : `WAVE ${k}`);
+  state.queue = waveSpec(k, Math.random, 1 + 0.6 * (players.length - 1), convoy ? state.delivered / 60 : 0); // ships join one at a time (flow), never the whole wave at once
+  state.merchants = convoy ? convoySpec(k).map((m, i) => ({ ...m, at: i * 4 })) : merchantSpec(k).map((m, i) => ({ ...m, at: 5 + i * 15 }));
+  state.convoyN = state.merchants.length;
+  let rebuilt = false;
+  for (const f of forts) if (!f.alive && k >= f.backAt) { fortUp(f); rebuilt = true; }
+  const [from, to] = route();
+  banner(convoy ? `CONVOY ${k} · ${from.name} → ${to.name}` : rebuilt ? `WAVE ${k} · THE FORT IS REBUILT` : fortActive(k) && k === 3 ? `WAVE ${k} · THE FORT OPENS FIRE` : `WAVE ${k}`);
 }
 const statBars = (s) => [
   ['SPEED', s.maxSpeed / 14], ['HANDLING', s.turn / 1.4], ['HULL', s.maxHp / 150],
@@ -454,7 +496,7 @@ function respawn(p, hpFrac) {
   for (let i = 0; a && i < 40; i++) {
     const r = Math.random() * Math.PI * 2, d = 12 + i * 0.5;
     x = a.x + Math.cos(r) * d; z = a.z + Math.sin(r) * d;
-    if (Math.max(Math.abs(x), Math.abs(z)) < ARENA - 6 && !ISLANDS.some((I) => Math.hypot(x - I.x, z - I.z) < I.r + 8)
+    if (Math.abs(x) < BOUNDS.x - 6 && Math.abs(z) < BOUNDS.z - 6 && !ISLANDS.some((I) => Math.hypot(x - I.x, z - I.z) < I.r + 8)
       && !ships.some((o) => o !== p && o.alive && Math.hypot(x - o.x, z - o.z) < 10)) break;
   }
   const h = a ? a.h : Math.atan2(-z, -x);
@@ -499,21 +541,29 @@ function flow(dt) {
   }
   if (state.mode === 'dead') return gameOver();
   if (state.mode === 'fight' && state.queue.length && state.t >= state.nextAt) {
-    const [x, z] = spawnPoint(), P = nearestPlayer({ x, z });
-    addShip(state.queue.shift(), 'navy', 1, x, z, Math.atan2(P.z - z, P.x - x), 3);
-    state.nextAt += 7;
+    if (convoy) spawnEscort(state.queue.shift());
+    else {
+      const [x, z] = spawnPoint(), P = nearestPlayer({ x, z });
+      addShip(state.queue.shift(), 'navy', 1, x, z, Math.atan2(P.z - z, P.x - x), 3);
+    }
+    state.nextAt += convoy ? 4 : 7;
   }
   while (state.mode === 'fight' && state.merchants[0]?.at <= state.t) spawnMerchant(state.merchants.shift());
-  if (state.mode === 'fight' && !state.queue.length && !ships.some((o) => o.team === 1 && o.alive)) {
+  // waves: the navy is sunk. convoy: no merchant left at sea (sunk, captured or in port), whatever is left of the escort
+  const cleared = convoy ? !state.merchants.length && !ships.some((o) => o.merchant && o.alive && !o.escaped)
+    : !state.queue.length && !ships.some((o) => o.team === 1 && o.alive);
+  if (state.mode === 'fight' && cleared) {
+    if (convoy) for (const o of ships) if (o.team === 1 && o.alive) o.escaped = true; // the escort's job is over: it sails off (removed like a merchant that got away)
     state.mode = 'lull';
     state.merchants = [];
+    state.queue = [];
     state.t = 0;
     for (const p of players) {
       if (!p.alive) respawn(p, 0.5); // co-op: sunk crewmates are back for the break
       p.repair = p.maxHp * 0.6; // patch up to 60% of the hull per break, a bit each frame
       p.crew = Math.min(p.maxCrew, p.crew + p.maxCrew * 0.3); // recruits between waves
     }
-    banner('WAVE CLEARED · REPAIRS', 2);
+    banner(convoy ? `${state.convoyN - state.port} TAKEN · ${state.port} MADE PORT${state.port ? ' · ESCORT REINFORCED' : ''}` : 'WAVE CLEARED · REPAIRS', convoy ? 3 : 2);
     sfx.fanfare();
   }
   for (const p of players) {
@@ -542,7 +592,7 @@ function pvpFlow(dt) {
     state.nextAt = state.t + 25;
     if (ships.filter((o) => o.merchant && o.alive && !o.escaped).length < 2) spawnMerchant(merchantSpec(4)[0]);
   }
-  if (fort && !fort.alive && time >= fort.upAt) fortUp();
+  for (const f of forts) if (!f.alive && time >= f.upAt) fortUp(f);
   if (state.mode !== 'pvp') return;
   state.left -= dt;
   const [top, second] = [...players].sort((a, b) => b.kills - a.kills);
@@ -561,17 +611,32 @@ function updateEnemies(dt) {
   if (!players.length) return; // ship select: nobody to shoot at yet
   for (const s of ships) {
     if (s.team !== 1 || !s.alive) continue;
-    const tgt = nearestPlayer(s), side = aiSteer(s, tgt);
+    let tgt = nearestPlayer(s);
+    if (s.escort === 'guard') {
+      // ward: kept until she's gone, then the merchant with the fewest guards (closest on a tie); station: the free side, further out per pair
+      if (!(s.ward?.alive && !s.ward.escaped)) {
+        const n = (o) => ships.filter((g) => g !== s && g.ward === o && g.alive).length;
+        s.ward = ships.filter((o) => o.merchant && o.alive && !o.escaped).sort((a, b) => n(a) - n(b) || Math.hypot(a.x - s.x, a.z - s.z) - Math.hypot(b.x - s.x, b.z - s.z))[0];
+        if (s.ward) { const k = n(s.ward); s.station = (k % 2 ? -1 : 1) * (12 + 8 * (k >> 1)); }
+      }
+      const w = s.ward && nearestPlayer(s.ward); // the pirate attacking the ward, not just the one nearest the guard
+      if (w && Math.hypot(w.x - s.ward.x, w.z - s.ward.z) < 45) tgt = w;
+    }
+    const side = s.escort === 'guard' ? guardSteer(s, s.ward, tgt) : aiSteer(s, tgt);
     if (side && !(tgt.smokeT > 0)) fire(s, side); // smoke screen: they can't see you
   }
   for (const s of ships) {
     if (s.team !== 2 || !s.alive || s.escaped) continue;
     const r = merchantSteer(s, nearestPlayer(s), dt);
-    if (r === 'escaped') { s.escaped = true; popup(s.x, s.z, 'ESCAPED'); }
+    if (r === 'escaped') {
+      s.escaped = true;
+      if (convoy) { state.delivered += s.gold; state.port++; } // her cargo pays for a bigger escort next time
+      popup(s.x, s.z, convoy ? `ESCAPED · +${s.gold} NAVY GOLD` : 'ESCAPED');
+    }
     else if (r) fire(s, r);
   }
-  if (!(fortActive(state.wave) || mode === 'pvp') || state.mode === 'dead' || !fort.alive) return;
-  for (const t of turrets) {
+  if (!fortsOn() || state.mode === 'dead') return;
+  for (const t of forts.flatMap((f) => (f.alive ? f.turrets : []))) {
     const b = fireTurret(t, nearestPlayer(t), dt);
     t.mesh.rotation.y = -t.aim;
     if (b) {
@@ -681,10 +746,10 @@ function pay(x, z, gold) {
   return gold;
 }
 // leaderboard: top 10 in this browser, ranked by wave then gold
-const LB_KEY = 'broadside.scores';
+const lbKey = () => (convoy ? 'broadside.convoy' : 'broadside.scores'); // one board per game
 const better = (a, b) => b.wave - a.wave || b.gold - a.gold;
-function loadScores() { try { return JSON.parse(localStorage.getItem(LB_KEY)) || []; } catch { return []; } }
-function saveScores(list) { try { localStorage.setItem(LB_KEY, JSON.stringify(list)); } catch {} } // private window: the run just isn't kept
+function loadScores() { try { return JSON.parse(localStorage.getItem(lbKey())) || []; } catch { return []; } }
+function saveScores(list) { try { localStorage.setItem(lbKey(), JSON.stringify(list)); } catch {} } // private window: the run just isn't kept
 let run = null;
 function gameOver() {
   if (state.t > 3 && $('over').hidden) { $('over').hidden = false; endRun(); }
@@ -698,7 +763,7 @@ function endRun() {
 }
 function showEntry() {
   const ini = (state.entry + '___').slice(0, 3).split('').join(' ');
-  $('over-stats').innerHTML = `Wave ${run.wave} · ${run.gold} gold<br>NEW HIGH SCORE! <b class="ini">${ini}</b><br><kbd>Enter</kbd> to sign`;
+  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<br>NEW HIGH SCORE! <b class="ini">${ini}</b><br><kbd>Enter</kbd> to sign`;
   $('over-help').hidden = true;
 }
 function submitEntry() {
@@ -711,7 +776,7 @@ function submitEntry() {
 }
 function showBoard(list, mine) {
   const rows = list.map((s, i) => `<tr${i === mine ? ' class="me"' : ''}><td>${i + 1}</td><td>${s.ini}</td><td>${s.wave}</td><td>${s.gold}</td><td>×${s.combo}</td><td>${s.ship}</td></tr>`).join('');
-  $('over-stats').innerHTML = `Wave ${run.wave} · ${run.gold} gold<table id="lb"><tr><th>#</th><th>NAME</th><th>WAVE</th><th>GOLD</th><th>COMBO</th><th>SHIP</th></tr>${rows}</table>`;
+  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<table id="lb"><tr><th>#</th><th>NAME</th><th>${convoy ? 'CONVOY' : 'WAVE'}</th><th>GOLD</th><th>COMBO</th><th>SHIP</th></tr>${rows}</table>`;
   $('over-help').hidden = false;
 }
 function updateLoot(dt) {
@@ -751,15 +816,16 @@ function updateBalls(dt) {
     sound('boom', b.x, b.z);
     flying.push(b);
   }
-  const targets = fort ? [...ships, fort] : ships;
+  const targets = [...ships, ...forts];
   for (let i = flying.length - 1; i >= 0; i--) {
     const b = flying[i];
     const ev = stepBall(b, dt, targets);
     if (!ev) continue;
     flying.splice(i, 1);
     if (ev.hit) {
-      fx.hit(b.x, ev.hit === fort ? 5.5 : Math.max(1, b.y), b.z);
-      if (ev.hit === fort && !fort.alive) fortDown();
+      const isFort = ev.hit.type === 'fort';
+      fx.hit(b.x, isFort ? 5.5 : Math.max(1, b.y), b.z);
+      if (isFort && !ev.hit.alive) fortDown(ev.hit);
       sound('hit', b.x, b.z);
       if (ev.hit === me) shake = Math.max(shake, 0.3);
     } else if (ev.land) {
@@ -795,7 +861,7 @@ function step(dt) {
     syncShip(s, time, dt);
     // flag, not a before/after check: balls, rams and kegs sink ships outside this loop
     if (!s.alive && !s.wrecked) { s.wrecked = true; sound('sink', s.x, s.z); if (s.isPlayer) pirateSunk(s); else dropLoot(s, comboKill(s.x, s.z)); }
-    // ponytail: every enemy wreck counts as the crew's kill (no killer tracking); navy never shoots merchants, so it holds
+    // ponytail: every enemy wreck counts as the crew's kill (no killer tracking); navy and merchants are allied (sim.js), so it holds
   }
   for (const r of collideShips(ships)) { fx.hit(r.x, 1.5, r.z); sound('hit', r.x, r.z); if (r.a === me || r.b === me) shake = Math.max(shake, 0.25); }
   // sunk enemies leave the scene (pirate wrecks stay: they respawn)
@@ -808,7 +874,7 @@ function step(dt) {
   }
   updateLoot(dt);
   updateKegs(dt);
-  if (fort && !fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len); // ruins smoulder
+  for (const fort of forts) if (!fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len); // ruins smoulder
   for (const p of players) if (p.smokeT > 0 && Math.random() < 0.5) fx.cloud(p.x, p.z);
   updateBalls(dt);
   fx.update(dt);
@@ -836,11 +902,12 @@ function hud() {
   $('room').hidden = net === 'solo';
   if (net !== 'solo') {
     const n = players.length, wait = net === 'host' && (mode === 'coop' ? state.mode === 'between' && state.wave === 0 && !state.go : state.mode !== 'pvp');
-    setHTML($('room'), (net === 'host' ? `ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${mode === 'pvp' ? 'PVP' : 'CO-OP'} · ${n} PIRATES`) +
+    setHTML($('room'), (net === 'host' ? `ROOM <b>${room.code()}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${n} PIRATES`) +
       (wait && me ? `<br><kbd>Enter</kbd> ${mode === 'pvp' ? (state.mode === 'over' ? 'rematch' : 'start the match') : 'set sail'}` : ''));
   }
   if (!me) return;
-  radar(me, ships, loot, fort && { x: fort.x, z: fort.z, active: (fortActive(state.wave) || mode === 'pvp') && fort.alive });
+  const on = fortsOn(), goal = convoy && state.mode === 'fight' && route()[1];
+  radar(me, ships, loot, forts.map((f) => ({ x: f.x, z: f.z, active: on && f.alive })), ISLANDS.filter((I) => I.kind === 'port').map((I) => ({ x: I.x, z: I.z, goal: I === goal })));
   $('coop').hidden = mode === 'pvp';
   $('pvp').hidden = mode !== 'pvp';
   if (mode === 'pvp') {
@@ -850,13 +917,16 @@ function hud() {
   }
   $('gold').textContent = state.gold;
   $('wave').textContent = state.wave;
+  $('wave-l').textContent = convoy ? 'CONVOY' : 'WAVE';
+  $('navy').hidden = !convoy;
+  $('delivered').textContent = state.delivered;
   $('combo').hidden = combo.n < 2;
   $('combo-n').textContent = '×' + Math.min(combo.n, 5);
   $('combo-t').style.width = (combo.t / COMBO_WIN) * 100 + '%';
   // hull bars above the mast tops: damaged enemies, plus every other pirate (with their tag)
   camera.updateMatrixWorld();
   const W = canvas.clientWidth, H = canvas.clientHeight;
-  for (const s of fort ? [...ships, fort] : ships) {
+  for (const s of [...ships, ...forts]) {
     if (s === me || (s.team === 0 && !s.isPlayer)) { if (s.bar) s.bar.hidden = true; continue; } // a crewmate who left: no frozen bar
     if (!s.bar) {
       s.bar = document.createElement('div');
@@ -868,7 +938,7 @@ function hud() {
     const show = s.alive && !s.escaped && (s.hp < s.maxHp || s.isPlayer);
     s.bar.hidden = !show;
     if (!show) continue;
-    _p.set(s.x, s === fort ? 9 : s.len * 0.95, s.z).project(camera);
+    _p.set(s.x, s.type === 'fort' ? 9 : s.len * 0.95, s.z).project(camera);
     s.bar.style.transform = `translate(${Math.round(((_p.x + 1) / 2) * W) - 24}px, ${Math.round(((1 - _p.y) / 2) * H) - 14}px)`;
     s.bar.firstChild.style.width = (s.hp / s.maxHp) * 100 + '%';
   }
@@ -1018,8 +1088,8 @@ function snap() {
     b: flying.map((b) => [b.id, b.x, b.y, b.z]),
     l: loot.map((o) => [o.id, o.x, o.z, o.life]),
     k: kegs.map((k) => [k.id, k.x, k.z]),
-    f: fort ? [fort.hp, fort.alive, turrets.map((t) => t.aim)] : null,
-    g: { mode: state.mode, wave: state.wave, gold: state.gold, t: state.t, left: state.left, banner: state.banner > 0 ? state.bannerText : '', bt: state.banner, combo: [combo.n, combo.t] },
+    f: forts.map((f) => [f.hp, f.alive, f.turrets.map((t) => t.aim)]),
+    g: { mode: state.mode, wave: state.wave, gold: state.gold, delivered: state.delivered, t: state.t, left: state.left, banner: state.banner > 0 ? state.bannerText : '', bt: state.banner, combo: [combo.n, combo.t] },
     e: events.splice(0),
   };
 }
@@ -1101,17 +1171,18 @@ function applySnap(m) {
   syncList(flying, ballById, m.b, BK, () => ({}));
   syncList(loot, lootById, m.l, LK, () => ({ mesh: barrelMesh(), seed: Math.random() * 6 }));
   syncList(kegs, kegById, m.k, KK, () => ({ mesh: kegMesh() }));
-  if (fort && m.f) {
-    const [hp, alive, aims] = m.f;
+  (m.f || []).forEach(([hp, alive, aims], i) => {
+    const fort = forts[i];
+    if (!fort) return;
     if (fort.alive !== alive) {
-      fortShow(alive);
+      fortShow(fort, alive);
       if (!alive) shake = Math.max(shake, 0.5);
     }
     Object.assign(fort, { hp, alive });
-    aims.forEach((a, i) => turrets[i] && (turrets[i].mesh.rotation.y = -a));
-  }
+    aims.forEach((a, j) => fort.turrets[j] && (fort.turrets[j].mesh.rotation.y = -a));
+  });
   const g = m.g, was = state.mode;
-  Object.assign(state, { mode: g.mode, wave: +g.wave || 0, gold: +g.gold || 0, t: g.t, left: g.left });
+  Object.assign(state, { mode: g.mode, wave: +g.wave || 0, gold: +g.gold || 0, delivered: +g.delivered || 0, t: g.t, left: g.left });
   [combo.n, combo.t] = g.combo;
   combo.best = Math.max(combo.best, combo.n);
   if (g.banner && g.banner !== lastBanner) banner(g.banner, g.bt);
@@ -1146,7 +1217,7 @@ function guestStep(dt) {
   drawBalls();
   for (const o of loot) { mix(o, LK, a); bobLoot(o); }
   for (const k of kegs) { mix(k, KK, a); k.mesh.position.set(k.x, 0.2 + Math.sin(time * 2 + k.id) * 0.1, k.z); }
-  if (fort && !fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len);
+  for (const fort of forts) if (!fort.alive && Math.random() < 0.4) fx.burn(fort.x + (Math.random() - 0.5) * fort.len, 5.5, fort.z + (Math.random() - 0.5) * fort.len);
   for (const p of players) if (p.smokeT > 0 && Math.random() < 0.5) fx.cloud(p.x, p.z);
   if (state.mode === 'dead' && me) gameOver();
   fx.update(dt);
@@ -1171,15 +1242,22 @@ function offline(msg) {
   for (const s of PREVIEW) if (!ships.includes(s)) ships.push(s); // hostGame took them out of the sim
   net = 'solo'; mode = 'coop'; room = null; myPid = 0; roomOpen = false; lobbyLock(false); lobbyMsg(msg);
 }
+// the lobby's GAME button: waves or convoy, for solo and HOST CO-OP (a guest gets the host's choice in 'hi')
+function setConvoy(on) {
+  if (convoy !== on) loadMap(on ? 'convoy' : 'waves');
+  convoy = on;
+  $('gm').textContent = on ? 'GAME: CONVOY' : 'GAME: WAVES';
+}
 function hostGame(m) {
   if (!online()) return;
   net = 'host';
   mode = m;
+  if (m === 'pvp') setConvoy(false);
   for (const s of PREVIEW) if (ships.includes(s)) ships.splice(ships.indexOf(s), 1); // still on screen, but no target for guests until one is picked
   lobbyMsg('OPENING ROOM…');
   room = hostRoom({
     open: (code) => { roomOpen = true; lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`); },
-    join: (pid) => room.send(pid, { t: 'hi', pid, mode }),
+    join: (pid) => room.send(pid, { t: 'hi', pid, mode, convoy }),
     msg: (pid, msg) => {
       if (msg.t === 'ship') return addPlayer(pid, msg.i | 0);
       const p = players.find((o) => o.pid === pid);
@@ -1205,7 +1283,7 @@ function joinGame() {
   room = joinRoom(code, {
     open: () => {},
     msg: (m) => {
-      if (m.t === 'hi') { myPid = m.pid; mode = m.mode; lobbyMsg(`JOINED ${mode === 'pvp' ? 'PVP' : 'CO-OP'} · pick your ship: 1, 2 or 3`); }
+      if (m.t === 'hi') { myPid = m.pid; mode = m.mode; setConvoy(!!m.convoy); lobbyMsg(`JOINED ${modeName()} · pick your ship: 1, 2 or 3`); }
       else if (m.s && guestShip !== null) applySnap(m);
     },
     close: () => {
@@ -1218,6 +1296,7 @@ function joinGame() {
     error: (e) => { if (!myPid) offline(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : `CONNECTION FAILED (${e.type})`); },
   });
 }
+$('gm').onclick = (e) => { e.currentTarget.blur(); setConvoy(!convoy); };
 $('host-coop').onclick = (e) => { e.currentTarget.blur(); hostGame('coop'); };
 $('host-pvp').onclick = (e) => { e.currentTarget.blur(); hostGame('pvp'); };
 $('join').onclick = (e) => { e.currentTarget.blur(); joinGame(); };
@@ -1225,7 +1304,7 @@ $('join').onclick = (e) => { e.currentTarget.blur(); joinGame(); };
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
 window.__game = {
-  get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, fort, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
+  get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, get forts() { return forts; }, setConvoy, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
   killWave: () => (state.queue = []) && ships.filter((o) => o.team === 1).forEach((o) => damage(o, 1e9)),
   startWave,
   advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); post.render(scene, camera); },

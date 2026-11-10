@@ -3,7 +3,7 @@
 // (PLAYWRIGHT=path/to/playwright-core, CHROME_PATH=browser binary if playwright's own is not installed).
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { ISLANDS, ARENA } from '../sim.js';
+import { ISLANDS, BOUNDS } from '../sim.js';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT || '../../ttrpg-online-platform/node_modules/playwright-core');
 const URL = process.env.URL || 'http://127.0.0.1:8765/';
@@ -68,7 +68,7 @@ assert.ok(gs.boom >= 1, 'guest heard no broadside');
 assert.deepEqual(gs, hs, 'guest and host played different sounds');
 
 // boarding while the host is still on ship select, far from the host's ear ({6, 6} with no ship)
-const spot = [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([a, b]) => [a * (ARENA - 25), b * (ARENA - 25)]).find(([x, z]) => ISLANDS.every((I) => Math.hypot(x - I.x, z - I.z) > I.r + 25));
+const spot = [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([a, b]) => [a * (BOUNDS.x - 25), b * (BOUNDS.z - 25)]).find(([x, z]) => ISLANDS.every((I) => Math.hypot(x - I.x, z - I.z) > I.r + 25));
 assert.ok(spot, 'no free corner');
 await H.evaluate(([x, z]) => {
   window.pin = setInterval(() => { // keep a struck merchant alongside the guest
