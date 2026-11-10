@@ -160,6 +160,7 @@ addEventListener('keydown', (e) => {
     e.target.blur();
   }
   // Without this, Firefox's find-as-you-type swallows letter keys and opens its search bar.
+  if (e.target.tagName === 'BUTTON') return; // a focused lobby button keeps Enter / Space (the click handlers blur it)
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.repeat) return;
   if (e.code === 'Escape') return net === 'solo' && togglePause(); // online: the world never stops
@@ -531,7 +532,7 @@ function pvpFlow(dt) {
     p.respawnAt ??= time + 4;
     if (time >= p.respawnAt) respawn(p, 1);
   }
-  if (state.t >= state.nextAt) { // merchants keep coming: loot to fight over
+  if (players.length && state.t >= state.nextAt) { // merchants keep coming: loot to fight over (not before anyone has a ship: nobody steers them)
     state.nextAt = state.t + 25;
     if (ships.filter((o) => o.merchant && o.alive && !o.escaped).length < 2) spawnMerchant(merchantSpec(4)[0]);
   }
@@ -1014,7 +1015,7 @@ function snap() {
 
 // Guests draw one snapshot interval behind: each value glides from where it is drawn now (_a) to the latest snapshot (_b).
 const SK = ['x', 'z', 'h', 'speed', 'turnRate', 'sinkT'], BK = ['x', 'y', 'z'], LK = ['x', 'z', 'life'], KK = ['x', 'z'];
-let snapAt = 0, lastBanner = '', lastIn = '';
+let snapAt = 0, lastBanner = '', lastIn = '', hostGone = false;
 const byId = new Map(), ballById = new Map(), lootById = new Map(), kegById = new Map();
 function track(o, keys, v, fresh) { o._a = fresh ? v : keys.map((k) => o[k]); o._b = v; }
 function mix(o, keys, a) {
@@ -1079,7 +1080,8 @@ function applySnap(m) {
     // host strings end up in innerHTML (scoreboard, cards, leaderboard): a guest never trusts them
     Object.assign(e, { tag: 'P' + ((e.pid | 0) + 1), name: esc(e.name), kills: +e.kills || 0,
       cards: (e.cards || []).map((c) => ({ id: String(c.id), label: esc(c.label) })),
-      skills: (e.skills || []).filter((k) => SKILLS[k.id]).map((k) => ({ ...k, lvl: Math.min(9, k.lvl | 0) })) });
+      skills: (e.skills || []).filter((k) => Object.hasOwn(SKILLS, k.id)).slice(0, 4).map((k) => ({ id: k.id, lvl: Math.max(1, Math.min(3, k.lvl | 0)) })),
+      cd: e.cd || {}, reload: e.reload || { port: 0, star: 0 } }); // a bad value here would throw in hud() and stop the frame loop
     players.push(Object.assign(s, e));
   }
   me = players.find((p) => p.pid === myPid) || null;
@@ -1120,6 +1122,8 @@ function guestStep(dt) {
   time += dt;
   if (state.banner > 0) state.banner -= dt;
   if (guestShip !== null) sendInput();
+  // the host pings even with its tab hidden, so the link stays up while the game stalls: say so
+  if (guestShip !== null && !hostGone && performance.now() - snapAt > 1500) banner('WAITING FOR THE HOST…', 0.5);
   const a = Math.min(1, (performance.now() - snapAt) / (SNAP_DT * 1000));
   for (const s of ships) { if (s._b) mix(s, SK, a); syncShip(s, time, dt); }
   for (const b of flying) mix(b, BK, a);
@@ -1191,6 +1195,7 @@ function joinGame() {
     },
     close: () => {
       if (!myPid) return offline('ROOM FULL, CLOSED OR UNREACHABLE');
+      hostGone = true;
       banner('HOST LEFT', 3);
       if (state.mode === 'dead') { state.t = Math.max(state.t, 3.1); return; } // run over: let the guest sign the leaderboard and reload themselves
       setTimeout(() => location.reload(), 3000);

@@ -19,7 +19,6 @@ export function hostRoom(h) {
   const code = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
   const peer = new Peer(PREFIX + code);
   const conns = new Map(), seen = new Map();
-  let next = 1;
   const drop = (id) => { const c = conns.get(id); if (conns.delete(id)) { c.close(); h.leave(id); } };
   let dead = false;
   const beat = setInterval(() => {
@@ -35,11 +34,11 @@ export function hostRoom(h) {
   peer.on('disconnected', () => setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000));
   peer.on('connection', (c) => {
     if (conns.size >= MAX_PLAYERS - 1) { c.on('open', () => setTimeout(() => c.close(), 500)); return; }
-    const id = next++;
+    let id = 1; while (conns.has(id)) id++; // lowest free seat: a rejoin in a 4-player room is not P5
     conns.set(id, c); seen.set(id, performance.now()); // seat taken now, not at open: overlapping joins can't pass the cap (never opens: TIMEOUT frees it)
     c.on('open', () => { if (conns.get(id) !== c) return; seen.set(id, performance.now()); h.join(id); });
-    c.on('data', (d) => { seen.set(id, performance.now()); const m = dec(d); if (m && m.t !== 'ping') h.msg(id, m); });
-    c.on('close', () => drop(id));
+    c.on('data', (d) => { if (conns.get(id) !== c) return; seen.set(id, performance.now()); const m = dec(d); if (m && m.t !== 'ping') h.msg(id, m); });
+    c.on('close', () => { if (conns.get(id) === c) drop(id); }); // a late close from the seat's previous holder must not kick the new one
   });
   return {
     code: () => code,

@@ -40,7 +40,7 @@ Home PCs sit behind a router (NAT) that drops unsolicited incoming connections, 
 
 1. **Signalling: finding each other.** The host registers on the free PeerJS server under `broadside-` + the room code. The guest asks the same server to connect it to that id. The server only relays a few setup messages; no game traffic goes through it.
 2. **STUN: learning your public address.** Each browser asks a STUN server (`stun.l.google.com`), which answers with the address it sees from outside. Both sides swap these candidate addresses through the signalling server.
-3. **Hole punching.** Both browsers send packets to each other's public address at the same time. Each router sees an outgoing packet first, so it lets the other side's packets in as "replies". The result is a direct, encrypted (DTLS) data channel between the two PCs.
+3. **Hole punching.** Both browsers send packets to each other's public address at the same time. Each router sees an outgoing packet first, so it lets the other side's packets in as "replies". The result is a direct, encrypted (DTLS) data channel between the two PCs. Direct also means each player sees the others' public IP address, so share a room code only with people you would give that to.
 
 When hole punching fails (strict or symmetric NATs, some corporate or mobile networks), traffic goes through a **TURN relay** instead. PeerJS ships with free community TURN servers (`eu-0` / `us-0.turn.peerjs.com`) in its default config, so this works out of the box, though with no guarantee. For something more reliable, pass your own `iceServers` to `new Peer(...)` in `net.js` (Cloudflare Calls, Metered, or a self-hosted coturn).
 
