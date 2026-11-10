@@ -85,14 +85,28 @@
   .slot.armed { border-color: #ffd24a; box-shadow: inset 0 0 0 3px #ff9b26; }
   .slot.locked { opacity: 0.5; } .slot.locked b { font-size: 22px; font-weight: normal; color: #b9a57d; }
   body.selecting #stats, body.selecting #score, body.selecting #radar-box, body.selecting #skills { display: none; }
+  #lobby { margin-top: 12px; font-size: 12px; pointer-events: auto; display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
+  #lobby button, #lobby input { font: inherit; color: #f5ecd2; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 2px #ad7a48; padding: 4px 10px; cursor: pointer; }
+  #lobby input { width: 64px; text-transform: uppercase; text-align: center; cursor: text; }
+  #lobby button:disabled, #lobby input:disabled { opacity: 0.5; cursor: default; }
+  #lobby-msg { width: 100%; min-height: 16px; color: #ffd24a; }
+  #room { left: 50%; top: 16px; transform: translateX(-50%); font-size: 12px; text-align: center; line-height: 1.6; }
+  #room b { color: #ffd24a; font-weight: normal; font-size: 16px; }
+  #room[hidden], #coop[hidden], #pvp[hidden] { display: none; }
+  .ebar.p i { background: #94c54c; } .ebar.e i { background: #ff7a2a; }
+  .ebar.p::before, .ebar.e::before { content: attr(data-tag); position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); font-size: 10px; color: #f5ecd2; }
 </style>
+<script defer src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
 </script>
 </head>
 <body class="selecting">
 <canvas id="c"></canvas>
-<div id="select" class="hud panel"><h2>Choose your ship: press 1, 2 or 3</h2><div id="select-list"></div></div>
+<div id="select" class="hud panel"><h2>Choose your ship: press 1, 2 or 3</h2><div id="select-list"></div>
+  <div id="lobby">ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
+</div>
+<div id="room" class="hud panel" hidden></div>
 <div id="stats" class="hud panel">
   <span>HULL</span><div class="bar"><i id="hp"></i></div>
   <span>SAIL</span><div class="bar"><i id="sail"></i></div>
@@ -100,7 +114,7 @@
   <span><kbd>E</kbd> STAR</span><div class="bar"><i id="rs"></i></div>
   <span>CREW <b id="crewn"></b></span><div class="bar"><i id="crew"></i></div>
 </div>
-<div id="score" class="hud panel">GOLD <b id="gold">0</b><br>WAVE <b id="wave">0</b><div id="combo" hidden>COMBO <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
+<div id="score" class="hud panel"><div id="pvp" hidden></div><div id="coop">GOLD <b id="gold">0</b><br>WAVE <b id="wave">0</b></div><div id="combo" hidden>COMBO <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
 <div id="bars" class="hud"><div id="board-hint" hidden></div></div>
 <div id="skills" class="hud"></div>
 <div id="radar-box" class="hud"><canvas id="radar"></canvas></div>

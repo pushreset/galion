@@ -1,0 +1,77 @@
+// P2P transport over PeerJS (global `Peer`, loaded from the CDN in index.html).
+// The host's peer id is the room: guests connect with the 4-letter code. Messages are JSON
+// strings with numbers rounded to 0.01 (snapshots stay small).
+// ponytail: PeerJS defaults: public signalling server, Google STUN and free community TURN relays (no SLA);
+// pass our own iceServers to new Peer() if the relays ever get unreliable.
+const PREFIX = 'broadside-';
+const enc = (m) => JSON.stringify(m, (k, v) => (typeof v === 'number' ? Math.round(v * 100) / 100 : v));
+const dec = (d) => { try { return JSON.parse(d); } catch { return null; } };
+export const MAX_PLAYERS = 4;
+// WebRTC can take ages to notice a closed tab: guests ping every second, and either side
+// drops the link after TIMEOUT ms of silence. The host pings too: its snapshots stop when its tab is
+// hidden (no frames), and a stalled game beats kicking everyone.
+const TIMEOUT = 8000;
+const PING = '{"t":"ping"}';
+const BACKLOG = 65536; // bytes queued on a guest's channel (a dozen snapshots or more) before the host skips some
+
+// h: { open(code), join(id), msg(id, m), leave(id), error(e) }
+export function hostRoom(h) {
+  const code = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
+  const peer = new Peer(PREFIX + code);
+  const conns = new Map(), seen = new Map();
+  const drop = (id) => { const c = conns.get(id); if (conns.delete(id)) { c.close(); h.leave(id); } };
+  let dead = false;
+  const beat = setInterval(() => {
+    for (const [id, c] of conns) {
+      if (performance.now() - seen.get(id) > TIMEOUT) drop(id);
+      else if (c.open) c.send(PING);
+    }
+  }, 1000);
+  peer.on('open', () => h.open(code));
+  peer.on('error', (e) => { if (!dead) h.error(e); });
+  // signalling socket lost (Wi-Fi blip, sleep): the game goes on over the data channels, but the code
+  // would stop working for late joiners. reconnect() re-registers the same id; retried every 3 s.
+  peer.on('disconnected', () => setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000));
+  peer.on('connection', (c) => {
+    if (conns.size >= MAX_PLAYERS - 1) { c.on('open', () => setTimeout(() => c.close(), 500)); return; }
+    let id = 1; while (conns.has(id)) id++; // lowest free seat: a rejoin in a 4-player room is not P5
+    conns.set(id, c); seen.set(id, performance.now()); // seat taken now, not at open: overlapping joins can't pass the cap (never opens: TIMEOUT frees it)
+    c.on('open', () => { if (conns.get(id) !== c) return; seen.set(id, performance.now()); h.join(id); });
+    c.on('data', (d) => { if (conns.get(id) !== c) return; seen.set(id, performance.now()); const m = dec(d); if (m && m.t !== 'ping') h.msg(id, m); });
+    c.on('close', () => { if (conns.get(id) === c) drop(id); }); // a late close from the seat's previous holder must not kick the new one
+  });
+  return {
+    code: () => code,
+    guests: () => conns.size,
+    close() { dead = true; clearInterval(beat); peer.destroy(); },
+    send(id, m) { const c = conns.get(id); if (c?.open) c.send(enc(m)); },
+    // snapshots only: a guest whose link can't keep up skips frames instead of queueing them and drifting
+    // into the past (the channel is reliable + ordered; state is absolute, so the next one corrects it)
+    broadcast(m) { const s = enc(m); for (const c of conns.values()) if (c.open && !(c.dataChannel?.bufferedAmount > BACKLOG)) c.send(s); },
+  };
+}
+
+// h: { open(), msg(m), close(), error(e) }
+export function joinRoom(code, h) {
+  const peer = new Peer();
+  let conn = null, seen = 0, closed = false, beat;
+  const stop = () => { closed = true; clearInterval(beat); peer.destroy(); };
+  const close = () => { if (!closed) { stop(); h.close(); } };
+  peer.on('open', () => {
+    conn = peer.connect(PREFIX + code.toUpperCase(), { reliable: true });
+    // the watchdog runs from the attempt, not from 'open': a channel that never opens (strict NAT, relay
+    // down) fires neither 'open' nor 'close', and the lobby would sit on CONNECTING… forever
+    seen = performance.now();
+    beat = setInterval(() => {
+      if (conn.open) conn.send(PING);
+      if (performance.now() - seen > TIMEOUT) close();
+    }, 1000);
+    conn.on('open', () => { seen = performance.now(); h.open(); });
+    conn.on('data', (d) => { if (closed) return; seen = performance.now(); const m = dec(d); if (m && m.t !== 'ping') h.msg(m); });
+    conn.on('close', close);
+    conn.on('error', close);
+  });
+  peer.on('error', (e) => { if (!closed) h.error(e); });
+  // close(): abandon the attempt silently (no h.close), so a stale Peer can't talk to a later one's lobby
+  return { send(m) { if (conn?.open) conn.send(enc(m)); }, close: stop };
+}

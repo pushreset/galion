@@ -169,6 +169,7 @@ export function stepBall(b, dt, ships) {
     const dx = b.x - s.x, dz = b.z - s.z, c = Math.cos(s.h), sn = Math.sin(s.h);
     const lx = dx * c + dz * sn, lz = -dx * sn + dz * c;
     if (Math.abs(lx) < s.len / 2 && Math.abs(lz) < s.beam * 0.6) {
+      s.lastHit = b.team; // kill credit (PvP)
       damage(s, b.dmg);
       if (b.ammo?.id === 'chain') s.slowT = Math.max(s.slowT, 3 * b.ammo.p);
       if (b.ammo?.id === 'fire') s.burnT = Math.max(s.burnT, 4 * b.ammo.p);
@@ -198,10 +199,11 @@ export function collideShips(ships) {
       b.x += nx * push; b.z += nz * push;
       const closing = (Math.cos(a.h) * a.speed - Math.cos(b.h) * b.speed) * nx + (Math.sin(a.h) * a.speed - Math.sin(b.h) * b.speed) * nz;
       if (closing > 3 && a.team !== b.team) { // allies just bump
+        a.lastHit = b.team; b.lastHit = a.team;
         damage(a, closing * 1.2);
         damage(b, closing * 1.2);
         a.speed *= 0.4; b.speed *= 0.4;
-        rams.push({ x: a.x + nx * a.len * 0.3, z: a.z + nz * a.len * 0.3 });
+        rams.push({ x: a.x + nx * a.len * 0.3, z: a.z + nz * a.len * 0.3, a, b });
       }
     }
   }
@@ -293,7 +295,7 @@ export function merchantSteer(s, player, dt) {
 }
 
 // --- boarding ---------------------------------------------------------------------
-export const canBoard = (p, e) => p.alive && e.alive && e.team !== 0 && e.type !== 'fort' && p.boardCd <= 0 &&
+export const canBoard = (p, e) => p.alive && e.alive && e.team !== p.team && !e.isPlayer && e.type !== 'fort' && p.boardCd <= 0 &&
   Math.hypot(e.x - p.x, e.z - p.z) < (p.len + e.len) * 0.4 + 3;
 // Below 20% hull the enemy strikes her colours; otherwise a melee decided round by round (game.js QTE).
 export const startBoarding = (p, e) => (e.hp < 0.2 * e.maxHp ? { auto: true } : { you: p.crew, you0: p.crew, them: e.crew, start: e.crew, round: 0 });
@@ -342,8 +344,9 @@ export function fireTurret(t, tgt, dt, rand = Math.random) {
 
 // --- waves & upgrades ---------------------------------------------------------
 // Gentle ramp: wave 1 is a lone sloop, brigs from 2, galleons from 4. game.js spawns them one by one.
-export function waveSpec(k, rand = Math.random) {
-  let budget = 0.5 + k;
+// mult scales the budget for co-op crews (capped at 8 ships either way).
+export function waveSpec(k, rand = Math.random, mult = 1) {
+  let budget = (0.5 + k) * mult;
   const opts = [['sloop', 1]];
   if (k >= 2) opts.push(['brig', 2]);
   if (k >= 4) opts.push(['galleon', 3]);
@@ -442,6 +445,6 @@ export function stepKeg(k, dt, ships) {
   if ((k.life -= dt) <= 0) return 'gone';
   const near = (s) => s.alive && s.team !== k.team && Math.hypot(s.x - k.x, s.z - k.z) < k.r + s.len * 0.3;
   if (!ships.some(near)) return null;
-  for (const s of ships.filter(near)) damage(s, k.dmg);
+  for (const s of ships.filter(near)) { s.lastHit = k.team; damage(s, k.dmg); }
   return 'boom';
 }
