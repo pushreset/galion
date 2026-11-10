@@ -4,7 +4,10 @@
 // Signalling: PeerJS's public server. NAT traversal: our own coturn relay (Coolify, coturn-compose.txt). Its
 // service hands out 1-hour credentials to the game's origin only; PeerJS's own TURN relays are gone (no DNS).
 const PREFIX = 'broadside-';
-const ICE_URL = 'https://ice-cedthaqnw77lgzrdexjkvcwt.46.62.255.60.sslip.io/';
+// ?ice=http://127.0.0.1:3000/ points at a local copy of the service (its origin check only lets the game's own origin in); node (check.mjs) has no location
+// loopback only: a link must not pick a player's TURN and matchmaking server
+const ice = new URLSearchParams(globalThis.location?.search).get('ice');
+const ICE_URL = /^http:\/\/(127\.0\.0\.1|localhost):\d+\/$/.test(ice) ? ice : 'https://ice-cedthaqnw77lgzrdexjkvcwt.46.62.255.60.sslip.io/';
 // unreachable → PeerJS's defaults (Google STUN): direct links still work, strict NATs don't
 const peerOpts = () => fetch(ICE_URL, { signal: AbortSignal.timeout(4000) }).then((r) => r.json())
   .then(({ iceServers }) => ({ config: { iceServers } })).catch(() => ({}));
@@ -17,10 +20,16 @@ export const MAX_PLAYERS = 4;
 const TIMEOUT = 8000;
 const PING = '{"t":"ping"}';
 const BACKLOG = 65536; // bytes queued on a guest's channel (a dozen snapshots or more) before the host skips some
+const newCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
+
+// Quick match (same service, /match): q = 'pvp' | 'coop-waves' | 'coop-convoy'. Resolves { host: code } | { join: code } |
+// { retry } for a lookup, null for a host heartbeat (extra = '&code=ABCD&free=2'); a guest that could not get in passes '&skip=ABCD'.
+export const match = (q, extra = '') => fetch(`${ICE_URL}match?q=${q}${extra}`, { signal: AbortSignal.timeout(4000) })
+  .then((r) => { if (!r.ok) throw new Error(r.status); return r.status === 204 ? null : r.json(); });
 
 // h: { open(code), join(id), msg(id, m), leave(id), error(e) }
-export function hostRoom(h) {
-  const code = Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
+// code: a quick-match room's code, handed out by the server
+export function hostRoom(h, code = newCode()) {
   const conns = new Map(), seen = new Map();
   const drop = (id) => { const c = conns.get(id); if (conns.delete(id)) { c.close(); h.leave(id); } };
   let dead = false, peer = null;

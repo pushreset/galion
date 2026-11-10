@@ -18,6 +18,8 @@ Then open the printed URL. Three.js loads from jsDelivr, so there's no install s
 
 Peer-to-peer, no server to run: on the ship select screen, one player clicks **HOST CO-OP** or **HOST PVP** and shares the 4-letter room code; the others type it and click **JOIN**, then everyone picks a ship. The host presses `Enter` to set sail (co-op) or start the match (PvP).
 
+- **Quick match**: **QUICK CO-OP** (waves or convoy, following the **GAME** button) or **QUICK PVP** drops you into a room with strangers, no code to share. The first player in a queue hosts; as soon as someone joins, a 15 s countdown starts (cut short when all 4 pirates have a ship), then the game sets sail on its own; a host who hasn't picked a ship by then gets a random one. Friends can still join a quick room with its code.
+
 - **Convoy** (solo or co-op: set the **GAME** button to CONVOY before picking a ship or hosting): its own long map between two ports, forts on the way. Each round a merchant convoy sails port to port with its escort: guards that stay beside the merchants, hunters that come for you. The round ends when every merchant is sunk, captured or in port. Gold that reaches port buys a bigger escort for the next convoys.
 - **Co-op**: shared gold, bigger waves, each pirate picks their own refit cards; a sunk pirate comes back at the next break, the run ends when the whole crew is sunk.
 - **PvP**: first to 10 sinkings (or most after 5 min). Each sinking refits the winner; merchants keep coming as loot (their barrels patch your hull).
@@ -44,6 +46,8 @@ Home PCs sit behind a router (NAT) that drops unsolicited incoming connections, 
 3. **Hole punching.** Both browsers send packets to each other's public address at the same time. Each router sees an outgoing packet first, so it lets the other side's packets in as "replies". The result is a direct, encrypted (DTLS) data channel between the two PCs. Direct also means each player sees the others' public IP address, so share a room code only with people you would give that to.
 
 When hole punching fails (strict or symmetric NATs, some corporate or mobile networks), traffic goes through a **TURN relay** instead. PeerJS ships with free community TURN servers (`eu-0` / `us-0.turn.peerjs.com`) in its default config, so this works out of the box, though with no guarantee. For something more reliable, pass your own `iceServers` to `new Peer(...)` in `net.js` (Cloudflare Calls, Metered, or a self-hosted coturn).
+
+**Quick match** adds one step before signalling: the same Coolify service that hands out TURN credentials keeps one open room per queue (`pvp`, `coop-waves`, `coop-convoy`). `GET /match?q=pvp` answers `{host: code}` (no open room: you open it, under that code), `{join: code}`, or `{retry}` while the room's host is still registering on PeerJS. The host reports its free seats every 10 s (`&code=…&free=n`; 0 as soon as the game starts, and while its tab is hidden, since a hidden tab runs no frames); a room silent for 25 s is dropped, and a guest who can't get in asks again with `&skip=code`. A host whose room was dropped while it still has free seats relists it with its next heartbeat (when the queue has no open room). The queues live in memory: a restart empties them, games already running don't notice and waiting hosts relist. To test locally, `qa/quick.mjs` runs a copy of the service and points the game at it with `?ice=http://127.0.0.1:3123/`.
 
 All of it is free: STUN answers once per connection (a few bytes), and signalling is a handful of messages. Only TURN carries real traffic, and only when the direct link fails.
 
@@ -92,6 +96,7 @@ Keys are physical positions, so AZERTY (ZQSD) and QWERTY (WASD) both work. AZERT
 | `radar.js` | Compass / radar |
 | `sfx.js` | Sound effects and procedural music |
 | `check.mjs` | Assertions on the sim: `node check.mjs` |
-| `qa/` | QA screenshots |
+| `coturn-compose.txt` | Coolify stack: coturn relay + `ice` service (TURN credentials, quick-match queues) |
+| `qa/` | QA screenshots, two-browser runs (`qa/e2e.mjs`, `qa/quick.mjs`) |
 
 Ideas backlog (in French): [`ideas.md`](ideas.md).
