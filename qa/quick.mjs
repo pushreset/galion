@@ -54,20 +54,26 @@ try {
     const H = await open('pvp host'), G = await open('pvp guest');
     await H.click('#quick-pvp');
     await lobby(H, /QUICK PVP · waiting/);
-    // the host looks at another tab while it waits: it stays listed, and is called back when the guest arrives
-    const vis = (hidden) => H.evaluate((h) => { Object.defineProperty(document, 'hidden', { get: () => h, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); }, hidden);
+    // the host looks at another tab while it waits: it stays listed, is called back when the guest arrives, and its game goes on
+    // without frames (like a real hidden tab: rAF is held back until the tab is shown again)
+    const vis = (hidden) => H.evaluate((h) => {
+      Object.defineProperty(document, 'hidden', { get: () => h, configurable: true });
+      if (h) { window.__raf = requestAnimationFrame; window.requestAnimationFrame = (f) => { window.__held = f; return 0; }; }
+      else { window.requestAnimationFrame = window.__raf; window.__raf(window.__held); }
+      document.dispatchEvent(new Event('visibilitychange'));
+    }, hidden);
     await vis(true);
     await G.click('#quick-pvp');
     await lobby(G, /pick your ship/); // not JOINED PVP: the countdown started when G connected, and a guest without a ship reads it there
     assert.equal(await H.title(), 'A PIRATE JOINED · COME BACK');
-    await vis(false);
-    assert.equal(await H.title(), 'Broadside');
     await G.evaluate(() => __game.choose(0));
-    await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 });
+    await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 }); // the hidden host counts down
     assert.ok(await G.evaluate(async () => { // the guest's countdown must not blink between two seconds
       for (let i = 0; i < 15; i++) { if (document.getElementById('banner').hidden) return false; await new Promise((r) => setTimeout(r, 100)); }
       return true;
     }), 'the countdown stays on screen on the guest');
+    await vis(false);
+    assert.equal(await H.title(), 'Broadside');
     await H.waitForFunction(() => __game.state.mode === 'pvp', null, { timeout: 25000 });
     assert.equal(await H.evaluate(() => __game.players.length), 2, 'host and guest both sail');
     await Promise.all([H.close(), G.close()]);

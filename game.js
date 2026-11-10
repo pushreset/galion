@@ -366,15 +366,27 @@ function syncShip(s, t, dt) {
 }
 
 let last = performance.now(), time = 0, frames = 0;
-function frame(now) {
+function tick(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (hitstop > 0) hitstop -= dt;
   else if (net === 'guest') guestStep(dt);
-  else if (!paused) step(dt); // still render: the frozen scene stays under the overlay
-  post.render(scene, camera);
+  else if (!paused) step(dt);
+}
+function frame(now) {
+  tick(now);
+  post.render(scene, camera); // paused too: the frozen scene stays under the overlay
   if (++frames === 2) window.__ready = true;
   requestAnimationFrame(frame);
+}
+// A hidden tab gets no frames and its timers drop to one a second, but the host runs the game for everyone: a worker's
+// timer is not slowed down in the background, and steps the sim at 30 Hz while the tab is hidden (nothing is drawn).
+// Started by hostGame; checked in Chrome, other browsers may still throttle it (guests then read WAITING FOR THE HOST…).
+let ticker = null;
+function hostTicker() {
+  if (ticker) return;
+  ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 33)'])));
+  ticker.onmessage = () => { if (document.hidden && net === 'host') tick(performance.now()); };
 }
 // --- waves -------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
@@ -620,9 +632,9 @@ function sail() {
   hostStart();
   if (quick && roomOpen && !was && started()) quickBeatNow();
 }
-// quick match, host → server: the seats still free. 0 once the game started, or once this tab has been hidden for over a minute (no frames
-// there: a guest would sit in a frozen game). A shorter absence stays listed: a host who looks away while waiting must still get its guest,
-// and the bell in `join` calls it back.
+// quick match, host → server: the seats still free. 0 once the game started, or once this tab has been hidden for over a minute (its
+// pirate is away, and not every browser keeps a hidden game running: see hostTicker). A shorter absence stays listed: a host who looks
+// away while waiting must still get its guest, and the bell in `join` calls it back.
 // ponytail: a host away for longer may find the slot taken when it returns, and then two hosts wait side by side; the server could tell the unlisted one to join the other
 const AWAY = 60000; // ms
 let hiddenAt = 0;
@@ -1386,6 +1398,7 @@ function setConvoy(on) {
 function hostGame(m, code) {
   if (!online()) return;
   net = 'host';
+  hostTicker();
   mode = m;
   if (m === 'pvp') setConvoy(false);
   for (const s of PREVIEW) if (ships.includes(s)) ships.splice(ships.indexOf(s), 1); // still on screen, but no target for guests until one is picked
@@ -1393,15 +1406,15 @@ function hostGame(m, code) {
   room = hostRoom({
     open: (code) => {
       roomOpen = true;
-      if (!quick) return lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`);
-      lobbyMsg(`QUICK ${modeName()} · waiting for pirates · keep this tab in front`);
+      if (!quick) return lobbyMsg(`ROOM ${code} · give friends the code`);
+      lobbyMsg(`QUICK ${modeName()} · waiting for pirates`);
       clearInterval(quickBeat); // 'open' fires again after a signalling reconnect
       quickBeat = setInterval(quickBeatNow, 10000);
       quickBeatNow();
     },
     join: (pid) => {
       room.send(pid, { t: 'hi', pid, mode, convoy });
-      if (document.hidden) { document.title = 'A PIRATE JOINED · COME BACK'; sfx.bell(); } // the game only runs with this tab in front
+      if (document.hidden) { document.title = 'A PIRATE JOINED · COME BACK'; sfx.bell(); } // the game goes on without its host's eyes (hostTicker), but not without its ship
     },
     msg: (pid, msg) => {
       if (msg.t === 'ship') return addPlayer(pid, msg.i | 0, msg.nick);
