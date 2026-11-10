@@ -36,7 +36,6 @@ Backlog d'idées pour la suite. Coût : **S** = quelques heures, **M** = une dem
 | Idée | Ce que ça apporte | Coût |
 |---|---|---|
 | **Météo** | Tempête (houle, éclairs, mer qui bouge le bateau), brouillard (boussole réduite, ennemis qui surgissent), calme plat (vent nul). | M |
-| **Kraken** | Événement rare : des tentacules sortent de l'eau autour d'un bateau, n'importe lequel, même ennemi. | M |
 
 ## Petits manques et finitions
 
@@ -46,4 +45,4 @@ Backlog d'idées pour la suite. Coût : **S** = quelques heures, **M** = une dem
 
 ## Déjà fait
 
-Trois bateaux au choix, vagues progressives, réparation entre les vagues et hors combat, effets sonores, barre de compétences (4 emplacements, apprentissage et niveaux), fort destructible, or ramassable avec aimant, navires marchands avec progression, abordage (auto sous 20 % de coque, sinon QTE barre de timing à Espace, jeu en pause) et équipage (pertes sous le feu, recharge plus lente en sous-effectif, recrues entre les vagues et prisonniers), pause (Échap), combos (multiplicateur d'or ×2 à ×5 si les navires coulent à moins de 6 s d'intervalle) et classement local (top 10, initiales, trié par vague puis or), musique procédurale (boucle en ré mineur, tambour pendant les combats), un sabord par canon (mis à jour avec l'amélioration) et des îles qui arrêtent les boulets.
+Trois bateaux au choix, vagues progressives, réparation entre les vagues et hors combat, effets sonores, barre de compétences (4 emplacements, apprentissage et niveaux), fort destructible, or ramassable avec aimant, navires marchands avec progression, abordage (auto sous 20 % de coque, sinon QTE barre de timing à Espace, jeu en pause) et équipage (pertes sous le feu, recharge plus lente en sous-effectif, recrues entre les vagues et prisonniers), pause (Échap), combos (multiplicateur d'or ×2 à ×5 si les navires coulent à moins de 6 s d'intervalle) et classement local (top 10, initiales, trié par vague puis or), musique procédurale (boucle en ré mineur, tambour pendant les combats), un sabord par canon (mis à jour avec l'amélioration) et des îles qui arrêtent les boulets. Kraken dans tous les modes : créature lente qui frappe tout bateau proche, joueur ou non (tentacule télégraphiée, à esquiver), tuable, sans butin.

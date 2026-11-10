@@ -83,18 +83,18 @@ export function createRadar(canvas) {
     for (const s of ships) {
       if (s === player || (s.team === 0 && !s.isPlayer) || !s.alive || s.escaped) continue;
       const ally = s.isPlayer && s.team === player.team;
-      const col = ally ? '#94c54c' : s.team === 2 ? '#ffd24a' : s.isPlayer ? '#ff7a2a' : '#d84a38'; // crewmates green, merchants gold, rival pirates orange, navy red
+      const col = ally ? '#94c54c' : s.team === 2 ? '#ffd24a' : s.team === 3 ? '#a552ad' : s.isPlayer ? '#ff7a2a' : '#d84a38'; // crewmates green, merchants gold, kraken purple, rival pirates orange, navy red
       const p = place(s.x, s.z);
       if (p.out) {
         // arrowhead on the ring, pointing outward
-        g.fillStyle = ally ? '#5f8f2e' : s.team === 2 ? '#c9952a' : s.isPlayer ? '#c2551a' : '#a52623';
+        g.fillStyle = ally ? '#5f8f2e' : s.team === 2 ? '#c9952a' : s.team === 3 ? '#7a3486' : s.isPlayer ? '#c2551a' : '#a52623';
         g.beginPath();
         g.moveTo(C + Math.cos(p.a) * (R + 4), C + Math.sin(p.a) * (R + 4));
         g.lineTo(C + Math.cos(p.a + 0.13) * (R - 3), C + Math.sin(p.a + 0.13) * (R - 3));
         g.lineTo(C + Math.cos(p.a - 0.13) * (R - 3), C + Math.sin(p.a - 0.13) * (R - 3));
         g.fill();
       } else {
-        const big = s.type === 'galleon' ? 6 : s.type === 'brig' ? 5 : 4;
+        const big = s.type === 'kraken' ? 8 : s.type === 'galleon' ? 6 : s.type === 'brig' ? 5 : 4;
         px(p.x, p.y, big + 2, '#1b110b');
         px(p.x, p.y, big, col);
       }

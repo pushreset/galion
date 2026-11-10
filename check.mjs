@@ -1,6 +1,6 @@
 // node check.mjs — asserts on the pure sim.
 import assert from 'node:assert/strict';
-import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward } from './sim.js';
+import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue } from './sim.js';
 
 const r0 = () => 0.5; // deterministic: no spread
 
@@ -371,5 +371,57 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   for (const c of conns) peers[0].h.connection(c);
   for (const c of conns) c.h.open();
   assert.equal(joined.length, MAX_PLAYERS - 1, 'overlapping joins passed the player cap');
+}
+
+// kraken (team 3): slams the nearest ship, player or not; every side's shot hurts it; it can't be boarded
+{
+  setMap('waves');
+  for (const team of [0, 1, 2]) {
+    const k = makeShip('kraken', 3, 0, 0, 0), tgt = makeShip('brig', team, 30, 0, 0);
+    tgt.alive = true;
+    const sl = krakenSteer(k, [k, tgt], r0);
+    assert.ok(sl && Math.abs(sl.x - 30) < 1e-9, 'kraken should slam team ' + team);
+    assert.equal(krakenSteer(k, [k, tgt], r0), null, 'slam reload not enforced');
+  }
+  const k = makeShip('kraken', 3, 0, 0, 0), far = makeShip('sloop', 0, 60, 0, 0);
+  assert.equal(krakenSteer(k, [k, far], r0), null, 'no slam out of range');
+  assert.equal(k.sail, 3, 'kraken closes in on a ship within 70');
+  // a slam between a pirate and a navy ship hurts both, nobody gets the kill; a ship that sailed off is spared
+  const pir = makeShip('sloop', 0, 0, 2, 0), navy = makeShip('sloop', 1, 0, -2, 0), gone = makeShip('sloop', 2, 20, 0, 0);
+  const sl = { x: 0, z: 0, t: 0.1, r: 5, dmg: 18 };
+  assert.equal(stepSlam(sl, 0.05, [pir, navy, gone]), null);
+  assert.equal(stepSlam(sl, 0.1, [pir, navy, gone]), 'slam');
+  assert.ok(pir.hp < pir.maxHp && navy.hp < navy.maxHp && pir.lastHit === 3);
+  assert.equal(gone.hp, gone.maxHp);
+  // a real dodge: abeam at full sail, a hard turn 0.3 s into the telegraph clears the slam in every player ship; holding course doesn't
+  for (const i of [0, 1, 2]) for (const turn of [0, 1]) {
+    const kr = makeShip('kraken', 3, -40, -100, 0), p = makePlayer(i, -40, -70, 0);
+    p.sail = 3; p.speed = p.maxSpeed;
+    const sl = krakenSteer(kr, [kr, p], r0);
+    for (let t = 0; t < 3 && sl.t > 0; t += 1 / 60) {
+      if (t >= 0.3) p.turnIn = turn;
+      stepShip(p, 1 / 60);
+      stepSlam(sl, 1 / 60, [p]);
+    }
+    assert.equal(p.hp < p.maxHp, !turn, `${PLAYER_SHIPS[i].name} ${turn ? 'turning hard should dodge' : 'holding course should be hit'}`);
+  }
+  // left alone, it always picks a wander point it can reach: off every island
+  for (const m of ['waves', 'convoy']) {
+    setMap(m);
+    for (let i = 0; i < 300; i++) {
+      const kr = makeShip('kraken', 3, 0, 0, 0);
+      krakenSteer(kr, [kr]);
+      assert.ok(!ISLANDS.some((I) => Math.hypot(kr.wander.x - I.x, kr.wander.z - I.z) < I.r + 10), 'wander point on an island (' + m + ')');
+    }
+  }
+  setMap('waves');
+  // pirate and navy broadsides both hit it
+  for (const team of [0, 1]) {
+    const s = makeShip('galleon', team, 0, 0, 0), kr = makeShip('kraken', 3, 0, 26, 0);
+    for (const b of fireBroadside(s, 1, r0)) for (let i = 0; i < 400; i++) if (stepBall(b, 1 / 60, [s, kr])) break;
+    assert.ok(kr.hp < kr.maxHp, 'team ' + team + ' should hit the kraken');
+  }
+  assert.equal(canBoard(makePlayer(0, 0, 0), makeShip('kraken', 3, 3, 0, 0)), false);
+  assert.ok(krakenDue(false, 4) && !krakenDue(false, 5) && krakenDue(true, 3) && !krakenDue(true, 4));
 }
 console.log('check ok');
