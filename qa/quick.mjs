@@ -54,8 +54,14 @@ try {
     const H = await open('pvp host'), G = await open('pvp guest');
     await H.click('#quick-pvp');
     await lobby(H, /QUICK PVP · waiting/);
+    // the host looks at another tab while it waits: it stays listed, and is called back when the guest arrives
+    const vis = (hidden) => H.evaluate((h) => { Object.defineProperty(document, 'hidden', { get: () => h, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); }, hidden);
+    await vis(true);
     await G.click('#quick-pvp');
     await lobby(G, /pick your ship/); // not JOINED PVP: the countdown started when G connected, and a guest without a ship reads it there
+    assert.equal(await H.title(), 'A PIRATE JOINED · COME BACK');
+    await vis(false);
+    assert.equal(await H.title(), 'Broadside');
     await G.evaluate(() => __game.choose(0));
     await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 });
     assert.ok(await G.evaluate(async () => { // the guest's countdown must not blink between two seconds
