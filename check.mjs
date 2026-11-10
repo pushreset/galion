@@ -348,8 +348,10 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   globalThis.setInterval = () => 0; // hostRoom's timeout sweep would keep node alive
   const { hostRoom, MAX_PLAYERS } = await import('./net.js');
   const joined = [];
+  globalThis.fetch = () => Promise.reject(new Error('offline')); // no relay service: PeerJS defaults
   hostRoom({ open() {}, join: (id) => joined.push(id), msg() {}, leave() {}, error() {} });
   globalThis.setInterval = si;
+  await new Promise((r) => setTimeout(r)); // the Peer is made once the ICE fetch settles
   const conns = Array.from({ length: 5 }, () => { const h = {}; return { h, open: true, on: (e, f) => (h[e] = f), close() {} }; });
   for (const c of conns) peers[0].h.connection(c);
   for (const c of conns) c.h.open();

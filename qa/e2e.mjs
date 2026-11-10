@@ -12,7 +12,7 @@ const errors = [];
 async function open(name) {
   const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
-  page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
+  page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_|CORS/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
   await page.goto(URL, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
   await page.evaluate(() => { // log every sound this page plays

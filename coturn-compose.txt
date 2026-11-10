@@ -1,0 +1,56 @@
+# Coolify "Docker Compose" resource: TURN relay (coturn) + credential service (ice) for galion
+# Env vars to set in Coolify:
+#   PUBLIC_IP   = public IP of the server
+#   TURN_HOST   = domain or public IP clients use to reach coturn
+#   TURN_SECRET = long random string (openssl rand -hex 32)
+# Firewall: open 3478 UDP+TCP and 49160-49200 UDP directly on the server (not through Traefik).
+services:
+  coturn:
+    image: coturn/coturn:4.6
+    network_mode: host
+    restart: unless-stopped
+    command: >
+      -n --log-file=stdout
+      --listening-port=3478 --min-port=49160 --max-port=49200
+      --external-ip=${PUBLIC_IP} --realm=galion
+      --use-auth-secret --static-auth-secret=${TURN_SECRET}
+      --fingerprint --no-cli --no-tls --no-dtls
+      --total-quota=20 --user-quota=8 --max-bps=1000000
+      --denied-peer-ip=10.0.0.0-10.255.255.255
+      --denied-peer-ip=172.16.0.0-172.31.255.255
+      --denied-peer-ip=192.168.0.0-192.168.255.255
+      --denied-peer-ip=127.0.0.0-127.255.255.255
+
+  ice:
+    image: node:22-alpine
+    restart: unless-stopped
+    command: node /app/ice.mjs
+    environment:
+      - SERVICE_FQDN_ICE_3000          # Coolify: domain + HTTPS via Traefik
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_HOST=${TURN_HOST}
+      - ORIGIN=https://pushreset.github.io
+    volumes:
+      - type: bind
+        source: ./ice.mjs
+        target: /app/ice.mjs
+        content: |
+          // 1-hour coturn credentials (TURN REST API), for the game's origin only
+          import { createServer } from 'node:http';
+          import { createHmac } from 'node:crypto';
+          const { TURN_SECRET, TURN_HOST, ORIGIN } = process.env;
+          const hits = new Map(); // ponytail: in-memory per-IP limit, reset every 10 min
+          setInterval(() => hits.clear(), 600_000);
+          createServer((req, res) => {
+            if (req.headers.origin !== ORIGIN) { res.writeHead(403).end(); return; }
+            const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0];
+            hits.set(ip, (hits.get(ip) || 0) + 1);
+            if (hits.get(ip) > 30) { res.writeHead(429, { 'Access-Control-Allow-Origin': ORIGIN }).end(); return; }
+            const username = `${Math.floor(Date.now() / 1000) + 3600}:galion`;
+            const credential = createHmac('sha1', TURN_SECRET).update(username).digest('base64');
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': ORIGIN, 'Cache-Control': 'no-store' });
+            res.end(JSON.stringify({ iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' },
+              { urls: [`turn:${TURN_HOST}:3478?transport=udp`, `turn:${TURN_HOST}:3478?transport=tcp`], username, credential },
+            ] }));
+          }).listen(3000);
