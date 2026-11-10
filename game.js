@@ -1351,14 +1351,14 @@ function quickGame(m, skip = '', tries = 0) {
   lobbyLock(true);
   lobbyMsg('SEARCHING…');
   quick = q; // set now: no ship pick while searching (offline() clears it)
-  match(q, skip && `&skip=${skip}`).then((r) => {
-    if (r.retry) return setTimeout(() => quickGame(m, '', tries), 1000); // a room is opening: join it once its host is reachable
-    const code = r.host || r.join;
-    if (!/^[A-Z]{4}$/.test(code)) throw new Error('bad answer'); // an old service build, or not our service: the code reaches innerHTML
+  match(q, skip && `&skip=${skip}`).catch(() => null).then((r) => { // only the lookup is caught: a bug in hostGame / joinGame must reach the console
+    if (r?.retry) return setTimeout(() => quickGame(m, '', tries), 1000); // a room is opening: join it once its host is reachable
+    const code = r?.host || r?.join;
+    if (!/^[A-Z]{4}$/.test(code)) return offline('MATCHMAKING UNREACHABLE'); // no answer, an old service build, or not our service: the code reaches innerHTML
     lobbyLock(false); // online() locks it again
     quickTries = tries;
     if (r.host) hostGame(m, code); else joinGame(code);
-  }).catch(() => offline('MATCHMAKING UNREACHABLE'));
+  });
 }
 // a quick room that could not be hosted or joined: ask again, telling the server to drop that one
 function retryQuick(skip) {

@@ -32,8 +32,10 @@ try {
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--ignore-gpu-blocklist', '--use-angle=metal'] });
   // 0. the service alone, on the queue the browsers below don't use
   {
-    const get = async (path) => { const r = await fetch(`http://127.0.0.1:${PORT}/${path}`, { headers: { Origin: new globalThis.URL(URL).origin } }); return r.status === 200 ? r.json() : r.status; };
-    const m = (qs = '') => get(`match?q=coop-waves${qs}`);
+    const get = async (path, ip = '') => { const r = await fetch(`http://127.0.0.1:${PORT}/${path}`, { headers: { Origin: new globalThis.URL(URL).origin, 'X-Forwarded-For': ip } }); return r.status === 200 ? r.json() : r.status; };
+    const m = (qs = '', ip) => get(`match?q=coop-waves${qs}`, ip);
+    const last = async (n, f) => { let r; while (n--) r = await f(); return r; };
+    assert.equal(await last(61, () => get('match?q=x&code=', '10.0.0.1')), 429, 'an empty code is not a heartbeat: it counts against the limit');
     assert.equal(await get('/'), 400, "'//' is refused, not a crash");
     const { host: A } = await m();
     await m(`&code=${A}&free=3`);
@@ -42,6 +44,7 @@ try {
     assert.deepEqual(await m(), { join: A });
     const { host: B } = await m();
     assert.ok(B && B !== A, 'room full: the next player opens another');
+    assert.deepEqual(await last(61, () => m('', '10.0.0.2')), { retry: 1 }, 'polls for an opening room are not rate limited');
     await sleep(10200); // B never opens (its host left): A, still waiting, takes the slot back with its heartbeat
     await m(`&code=${A}&free=3`);
     assert.deepEqual(await m(), { join: A }, 'a waiting host is relisted over a dead room');

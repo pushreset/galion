@@ -71,13 +71,14 @@ services:
             if (!URL.canParse(req.url, 'http://x')) { res.writeHead(400, cors).end(); return; } // '//' and the like: new URL would throw and take the process down
             const url = new URL(req.url, 'http://x'), q = url.searchParams.get('q');
             const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0];
-            if (!(url.pathname === '/match' && url.searchParams.has('code'))) { // heartbeats (every 10 s) don't count
+            if (!(url.pathname === '/match' && url.searchParams.get('code'))) { // heartbeats (every 10 s) don't count; an empty code is a lookup
               hits.set(ip, (hits.get(ip) || 0) + 1);
               if (hits.get(ip) > 60) { res.writeHead(429, cors).end(); return; }
             }
             if (url.pathname === '/match') {
               if (!Object.hasOwn(rooms, q)) { res.writeHead(400, cors).end(); return; }
               const m = match(q, url.searchParams);
+              if (m?.retry) hits.set(ip, hits.get(ip) - 1); // changed nothing: 1 Hz polls for an opening room don't eat the budget shared with the credentials
               if (!m) { res.writeHead(204, cors).end(); return; }
               res.writeHead(200, { ...cors, 'Content-Type': 'application/json' });
               res.end(JSON.stringify(m));
