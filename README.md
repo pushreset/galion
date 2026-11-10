@@ -51,7 +51,7 @@ All of it is free: STUN answers once per connection (a few bytes), and signallin
 The host runs the whole simulation; guests are thin clients:
 
 - **Guest → host**: input (`{t: 'in', turn, fireL, fireR}` when it changes) and actions (`sail`, `skill`, `board`, `card`, `ship`), plus a ping every second. The host clamps everything it receives.
-- **Host → guests, 20×/s**: a snapshot with ships (compact arrays), cannonballs, loot, kegs, the fort, game state and HUD data for each pirate. It also carries the one-shot effects of the last 50 ms (hits, splashes, muzzle flashes, popups). JSON with numbers rounded to 0.01, a few KB per snapshot.
+- **Host → guests, 20×/s**: a snapshot with ships (compact arrays), cannonballs, loot, kegs, the fort, game state and HUD data for each pirate. It also carries the one-shot effects of the last 50 ms (hits, splashes, muzzle flashes, popups, sounds). JSON with numbers rounded to 0.01, a few KB per snapshot.
 - Guests draw one snapshot behind and glide each value between the last two, so movement stays smooth at 60 fps. Sounds are replayed relative to the guest's own ship.
 - If either side hears nothing for 8 s, the link is dropped: a guest who leaves sinks, and guests go back to the lobby if the host leaves.
 

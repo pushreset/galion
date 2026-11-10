@@ -317,9 +317,10 @@ export function buildShip(type, livery, ports = SPECS[type].ports) {
   body.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: '#1b110b' })));
 
   // hull foam: flat band hugging the waterline, lives on root so it doesn't roll
-  root.add(foamRing(sp));
+  const foam = foamRing(sp);
+  root.add(foam);
 
-  const mesh = { root, body, flag, sails, rigs, guns, spec: sp };
+  const mesh = { root, body, flag, foam, sails, rigs, guns, spec: sp };
   setGuns(mesh, ports);
   return mesh;
 }
