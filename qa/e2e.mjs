@@ -43,7 +43,7 @@ const count = (page, k) => page.evaluate((k) => snd.filter((n) => n === k).lengt
 const H = await open('host'), G = await open('guest');
 await H.click('#host-pvp');
 const code = await lobby(H, /ROOM ([A-Z]{4})/);
-await G.fill('#nick', 'jack42!'); // letters only, 6 max
+await G.fill('#nick', 'jack42!'); // letters only, 12 max
 assert.equal(await G.inputValue('#nick'), 'JACK');
 await G.fill('#code', code);
 await G.click('#join');

@@ -1123,8 +1123,8 @@ function syncList(list, map, rows, keys, make) {
     list.splice(i, 1);
   }
 }
-// player name: up to 6 letters (digits in a lobby input pick a ship); also cleans what a guest or host sends
-const nick = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6);
+// player name: up to 12 letters (digits in a lobby input pick a ship); also cleans what a guest or host sends
+const nick = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 12);
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 function applySnap(m) {
   // glide over the gap the snapshots really arrive at (3 or 4 host frames, more on a slow link), not a fixed 50 ms
