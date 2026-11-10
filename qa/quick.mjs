@@ -16,7 +16,7 @@ ice.stdin.end(src);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 await sleep(500);
 
-const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--ignore-gpu-blocklist', '--use-angle=metal'] });
+let browser; // launched inside the try: a failed launch must not leave the service on PORT
 const errors = [];
 async function open(name) {
   const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
@@ -29,6 +29,23 @@ async function open(name) {
 const lobby = (page, re) => page.waitForFunction((s) => new RegExp(s).test(document.getElementById('lobby-msg').textContent), re.source, { timeout: 30000 });
 
 try {
+  browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--ignore-gpu-blocklist', '--use-angle=metal'] });
+  // 0. the service alone, on the queue the browsers below don't use
+  {
+    const get = async (path) => { const r = await fetch(`http://127.0.0.1:${PORT}/${path}`, { headers: { Origin: new globalThis.URL(URL).origin } }); return r.status === 200 ? r.json() : r.status; };
+    const m = (qs = '') => get(`match?q=coop-waves${qs}`);
+    assert.equal(await get('/'), 400, "'//' is refused, not a crash");
+    const { host: A } = await m();
+    await m(`&code=${A}&free=3`);
+    assert.deepEqual([await m(), await m()], [{ join: A }, { join: A }]);
+    await m(`&code=${A}&free=3`); // those two are still connecting: the host's count must not hand their seats out again
+    assert.deepEqual(await m(), { join: A });
+    const { host: B } = await m();
+    assert.ok(B && B !== A, 'room full: the next player opens another');
+    await sleep(10200); // B never opens (its host left): A, still waiting, takes the slot back with its heartbeat
+    await m(`&code=${A}&free=3`);
+    assert.deepEqual(await m(), { join: A }, 'a waiting host is relisted over a dead room');
+  }
   // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host gets a ship)
   {
     const H = await open('pvp host'), G = await open('pvp guest');
@@ -38,6 +55,10 @@ try {
     await lobby(G, /JOINED PVP/);
     await G.evaluate(() => __game.choose(0));
     await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 });
+    assert.ok(await G.evaluate(async () => { // the guest's countdown must not blink between two seconds
+      for (let i = 0; i < 15; i++) { if (document.getElementById('banner').hidden) return false; await new Promise((r) => setTimeout(r, 100)); }
+      return true;
+    }), 'the countdown stays on screen on the guest');
     await H.waitForFunction(() => __game.state.mode === 'pvp', null, { timeout: 25000 });
     assert.equal(await H.evaluate(() => __game.players.length), 2, 'host and guest both sail');
     await Promise.all([H.close(), G.close()]);
@@ -58,6 +79,6 @@ try {
   assert.deepEqual(errors, [], 'page errors');
   console.log('quick match ok');
 } finally {
-  await browser.close();
+  await browser?.close();
   ice.kill();
 }

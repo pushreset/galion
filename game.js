@@ -78,7 +78,7 @@ let convoy = false;
 const modeName = () => (mode === 'pvp' ? 'PVP' : convoy ? 'CONVOY' : 'CO-OP');
 let net = 'solo', mode = 'coop', room = null, myPid = 0, roomOpen = false; // roomOpen: the host's room got its code
 // quick match: the server queue this room came from ('pvp' | 'coop-waves' | 'coop-convoy'), the host's countdown end, attempts so far
-let quick = null, quickAt = null, quickTries = 0, quickBeat = 0;
+let quick = null, quickAt = null, quickSec = null, quickTries = 0, quickBeat = 0;
 const events = [];
 for (const k of ['hit', 'splash', 'muzzle']) {
   const f = fx[k];
@@ -209,7 +209,7 @@ addEventListener('keydown', (e) => {
     return;
   }
   if ((state.mode === 'dead' && state.t > 3) && (e.code === 'Space' || e.code === 'Enter')) return location.reload();
-  if (e.code === 'Enter' && net === 'host') return hostStart();
+  if (e.code === 'Enter' && net === 'host') return sail();
   const msg = e.code === 'Space' && state.mode !== 'pick' ? { t: 'board' }
     : e.code === 'KeyW' ? { t: 'sail', d: 1 } : e.code === 'KeyS' ? { t: 'sail', d: -1 }
     : pick !== undefined ? (me?.cards?.length ? { t: 'card', i: pick } : { t: 'skill', i: pick }) : null;
@@ -602,13 +602,31 @@ const QUICK_WAIT = 15; // s
 function quickFlow() {
   if (!quick || net !== 'host' || !roomOpen || started()) return;
   const n = room.guests();
-  if (!n) { quickAt = null; return; } // the last guest left: wait for the next one
+  if (!n) { quickAt = quickSec = null; return; } // the last guest left: wait for the next one
   quickAt ??= time + QUICK_WAIT;
   if (n === MAX_PLAYERS - 1 && players.length === MAX_PLAYERS) quickAt = Math.min(quickAt, time);
-  if (time < quickAt) return banner(`SETTING SAIL IN ${Math.ceil(quickAt - time)}`, 0.3); // rides the snapshot: guests count down too
+  if (time < quickAt) {
+    // once per second, not per frame: guests only re-arm a banner when its text changes (so it must outlast the second), and JOINS / LEFT get to show until the next tick
+    const s = Math.ceil(quickAt - time);
+    if (s !== quickSec) { quickSec = s; banner(`SETTING SAIL IN ${s}`, 1.5); } // rides the snapshot: guests count down too
+    return;
+  }
   if (!me) choosePlayer(Math.floor(Math.random() * PLAYER_SHIPS.length)); // ponytail: an idle host gets a random ship
-  hostStart();
+  sail();
 }
+// the host's Enter, or the quick-match clock: a quick room that just started tells the server now (no more guests), not at the next 10 s beat
+function sail() {
+  const was = started();
+  hostStart();
+  if (quick && roomOpen && !was && started()) quickBeatNow();
+}
+// quick match, host → server: the seats still free. 0 once the game started, or while this tab is hidden (no frames: a guest would sit in a frozen game)
+function quickBeatNow() {
+  const on = started(), id = quickBeat;
+  match(quick, `&code=${room.code()}&free=${on || document.hidden ? 0 : MAX_PLAYERS - 1 - room.guests()}`)
+    .then(() => { if (on) clearInterval(id); }).catch(() => {}); // started: beats stop once the server got the 0 (a failed one is retried at the next beat)
+}
+document.addEventListener('visibilitychange', () => { if (quick && net === 'host' && roomOpen && !started()) quickBeatNow(); }); // hidden: delist now; back: relist
 // PvP: 'between' (warm-up until the host presses Enter) → 'pvp' → 'over' (Enter: rematch)
 function pvpFlow(dt) {
   for (const p of players) {
@@ -1323,7 +1341,7 @@ function offline(msg) {
   room?.close(); // or the abandoned Peer keeps calling back into the next attempt
   for (const s of PREVIEW) if (!ships.includes(s)) ships.push(s); // hostGame took them out of the sim
   clearInterval(quickBeat);
-  net = 'solo'; mode = 'coop'; room = null; myPid = 0; roomOpen = false; quick = quickAt = null; quickTries = 0; lobbyLock(false); lobbyMsg(msg);
+  net = 'solo'; mode = 'coop'; room = null; myPid = 0; roomOpen = false; quick = quickAt = quickSec = null; quickTries = 0; lobbyLock(false); lobbyMsg(msg);
 }
 // QUICK CO-OP / QUICK PVP: the server hands out a room code to host or to join (co-op: the GAME button picks the queue)
 function quickGame(m, skip = '', tries = 0) {
@@ -1366,13 +1384,9 @@ function hostGame(m, code) {
       roomOpen = true;
       if (!quick) return lobbyMsg(`ROOM ${code} · give friends the code · keep this tab in front`);
       lobbyMsg(`QUICK ${modeName()} · waiting for pirates · keep this tab in front`);
-      // every 10 s, the seats still free; 0 once the game started (the server stops sending guests here), then no more beats
-      const beat = () => {
-        if (started()) clearInterval(quickBeat);
-        match(quick, `&code=${code}&free=${started() ? 0 : MAX_PLAYERS - 1 - room.guests()}`).catch(() => {});
-      };
-      beat();
-      quickBeat = setInterval(beat, 10000);
+      clearInterval(quickBeat); // 'open' fires again after a signalling reconnect
+      quickBeat = setInterval(quickBeatNow, 10000);
+      quickBeatNow();
     },
     join: (pid) => room.send(pid, { t: 'hi', pid, mode, convoy }),
     msg: (pid, msg) => {

@@ -44,22 +44,23 @@ services:
           // Quick match: one open room per queue; the server only hands out room codes, games stay P2P.
           // ponytail: rooms fill one at a time, in memory (a restart empties the queues, running games go on); region / skill buckets if traffic grows
           const SEATS = 3; // guests per room: MAX_PLAYERS - 1 in net.js
-          const rooms = { pvp: null, 'coop-waves': null, 'coop-convoy': null }; // { code, free, seen, ready }
+          const rooms = { pvp: null, 'coop-waves': null, 'coop-convoy': null }; // { code, free, seen, ready, handed }
           const newCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
           // ?q=Q[&skip=CODE] → { host } | { join } | { retry }; ?q=Q&code=CODE&free=N → host heartbeat (N = 0 closes), null
           function match(q, p) {
-            const now = Date.now(), r = rooms[q], code = p.get('code');
+            const now = Date.now(), code = p.get('code');
+            let r = rooms[q];
+            if (r && now - r.seen > (r.ready ? 25_000 : 10_000)) r = rooms[q] = null; // a host gone quiet, or one that never opened its room: a waiting host's heartbeat can take the slot
             if (code) {
               const free = Math.max(0, Math.min(SEATS, parseInt(p.get('free'), 10) || 0));
-              if (r?.code === code) { if (free) Object.assign(r, { free, seen: now, ready: true }); else rooms[q] = null; }
+              if (r?.code === code) { if (free) Object.assign(r, { free: now - r.handed < 8000 ? Math.min(r.free, free) : free, seen: now, ready: true }); else rooms[q] = null; } // a seat just handed out: its guest is still connecting, the host does not count it yet
               else if (!r && free && /^[A-Z]{4}$/.test(code)) rooms[q] = { code, free, seen: now, ready: true }; // dropped (skip, full, timeout, restart) but still waiting: relist
               return null;
             }
-            // a guest reports a dead / full room (skip); a host gone quiet; a host that never opened its room
-            if (r && (r.code === p.get('skip') || now - r.seen > (r.ready ? 25_000 : 10_000))) rooms[q] = null;
+            if (r?.code === p.get('skip')) rooms[q] = null; // a guest reports a dead / full room
             const o = rooms[q];
             if (o && !o.ready) return { retry: 1 }; // its host is still registering on PeerJS: a guest now would not find it
-            if (o?.free > 0) { o.free--; return { join: o.code }; }
+            if (o?.free > 0) { o.free--; o.handed = now; return { join: o.code }; }
             // every seat handed out (guests still connecting): open the next room
             rooms[q] = { code: newCode(), free: SEATS, seen: now, ready: false };
             return { host: rooms[q].code };
@@ -67,6 +68,7 @@ services:
           createServer((req, res) => {
             if (req.headers.origin !== ORIGIN) { res.writeHead(403).end(); return; }
             const cors = { 'Access-Control-Allow-Origin': ORIGIN, 'Cache-Control': 'no-store' };
+            if (!URL.canParse(req.url, 'http://x')) { res.writeHead(400, cors).end(); return; } // '//' and the like: new URL would throw and take the process down
             const url = new URL(req.url, 'http://x'), q = url.searchParams.get('q');
             const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0];
             if (!(url.pathname === '/match' && url.searchParams.has('code'))) { // heartbeats (every 10 s) don't count
