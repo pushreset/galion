@@ -649,7 +649,7 @@ function updateEnemies(dt) {
     }
     else if (r) fire(s, r);
   }
-  for (const s of ships) if (s.type === 'kraken') { const sl = krakenSteer(s, ships); if (sl) addSlam(sl); }
+  for (const s of ships) if (s.type === 'kraken' && !s.escaped) { const sl = krakenSteer(s, ships); if (sl) addSlam(sl); }
   if (!fortsOn() || state.mode === 'dead') return;
   for (const t of forts.flatMap((f) => (f.alive ? f.turrets : []))) {
     const b = fireTurret(t, nearestPlayer(t), dt);
@@ -704,6 +704,8 @@ function spawnKraken() {
 }
 function diveKraken() {
   for (const o of ships) if (o.type === 'kraken' && o.alive) { o.escaped = true; fx.splash(o.x, o.z); } // removed like a merchant that got away
+  for (const sl of slams) scene.remove(sl.mesh); // and its arms in the air go with it
+  slams.length = 0;
 }
 function krakenSlain(k) {
   for (let i = 0; i < 4; i++) fx.splash(k.x + Math.random() * 8 - 4, k.z + Math.random() * 8 - 4);
@@ -918,8 +920,8 @@ function step(dt) {
     stepShip(s, dt);
     syncShip(s, time, dt);
     // flag, not a before/after check: balls, rams and kegs sink ships outside this loop
-    if (!s.alive && !s.wrecked) { s.wrecked = true; sound('sink', s.x, s.z); if (s.isPlayer) pirateSunk(s); else if (s.type === 'kraken') krakenSlain(s); else dropLoot(s, comboKill(s.x, s.z)); }
-    // ponytail: every enemy wreck counts as the crew's kill (no killer tracking); navy and merchants are allied (sim.js), so it holds
+    if (!s.alive && !s.wrecked) { s.wrecked = true; sound('sink', s.x, s.z); if (s.isPlayer) pirateSunk(s); else if (s.type === 'kraken') krakenSlain(s); else if (s.lastHit !== 3) dropLoot(s, comboKill(s.x, s.z)); }
+    // ponytail: every enemy wreck counts as the crew's kill (no killer tracking), except one the kraken finished (lastHit 3, stepSlam / collideShips): navy and merchants are allied (sim.js), so it holds
   }
   for (const r of collideShips(ships)) { fx.hit(r.x, 1.5, r.z); sound('hit', r.x, r.z); if (r.a === me || r.b === me) shake = Math.max(shake, 0.25); }
   // sunk enemies leave the scene (pirate wrecks stay: they respawn)

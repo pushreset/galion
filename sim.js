@@ -344,7 +344,7 @@ export function merchantSteer(s, player, dt) {
 
 // --- kraken (team 3) -------------------------------------------------------------
 // Drifts toward s.wander; closes in on the nearest ship within 70, player or not. Returns a slam or null.
-export const SLAM = { t: 1.2, r: 5, dmg: 18 };
+export const SLAM = { t: 2.2, r: 3, dmg: 18 }; // tuned so a hard turn 0.3 s into the telegraph clears it in every player ship (check.mjs)
 export function krakenSteer(s, ships, rand = Math.random) {
   if (!s.alive) return null;
   let tgt = null, bd = 70;
@@ -352,21 +352,23 @@ export function krakenSteer(s, ships, rand = Math.random) {
     const d = Math.hypot(o.x - s.x, o.z - s.z);
     if (o !== s && o.alive && !o.escaped && o.team !== 3 && d < bd) { bd = d; tgt = o; }
   }
-  if (!s.wander || Math.hypot(s.wander.x - s.x, s.wander.z - s.z) < 10) s.wander = { x: (rand() * 2 - 1) * (BOUNDS.x - 30), z: (rand() * 2 - 1) * (BOUNDS.z - 30) };
+  // a point off every island (a point inside steerTo's shore margin can't be reached: the kraken would circle it forever)
+  for (let i = 0; i < 20 && (!s.wander || Math.hypot(s.wander.x - s.x, s.wander.z - s.z) < 10 || ISLANDS.some((I) => Math.hypot(s.wander.x - I.x, s.wander.z - I.z) < I.r + 10)); i++)
+    s.wander = { x: (rand() * 2 - 1) * (BOUNDS.x - 30), z: (rand() * 2 - 1) * (BOUNDS.z - 30) };
   const go = tgt && bd > 14 ? tgt : tgt ? null : s.wander; // close enough: hold and slam
   s.sail = go ? 3 : 0;
   if (go) steerTo(s, Math.atan2(go.z - s.z, go.x - s.x));
   else s.turnIn = 0;
   if (!tgt || bd > s.range || s.reload.port > 0) return null;
   s.reload.port = s.reloadTime;
-  const lead = SLAM.t * 0.8; // aim where the ship will be: holding course gets you hit, a turn dodges it
+  const lead = SLAM.t; // aim where the ship will be: holding course gets you hit, a hard turn dodges it
   return { x: tgt.x + Math.cos(tgt.h) * tgt.speed * lead, z: tgt.z + Math.sin(tgt.h) * tgt.speed * lead, t: SLAM.t, r: SLAM.r, dmg: SLAM.dmg };
 }
 // A tentacle rises (telegraph), then comes down: 'slam' once it hits the water, hurting every ship under it.
 export function stepSlam(sl, dt, ships) {
   if ((sl.t -= dt) > 0) return null;
   for (const s of ships) {
-    if (!s.alive || s.team === 3 || Math.hypot(s.x - sl.x, s.z - sl.z) > sl.r + s.len * 0.3) continue;
+    if (!s.alive || s.team === 3 || Math.hypot(s.x - sl.x, s.z - sl.z) > sl.r + s.len * 0.2) continue;
     s.lastHit = 3; // nobody's kill (PvP)
     damage(s, sl.dmg);
     s.slowT = Math.max(s.slowT || 0, 1.5);

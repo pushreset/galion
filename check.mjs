@@ -393,6 +393,28 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   assert.equal(stepSlam(sl, 0.1, [pir, navy, gone]), 'slam');
   assert.ok(pir.hp < pir.maxHp && navy.hp < navy.maxHp && pir.lastHit === 3);
   assert.equal(gone.hp, gone.maxHp);
+  // a real dodge: abeam at full sail, a hard turn 0.3 s into the telegraph clears the slam in every player ship; holding course doesn't
+  for (const i of [0, 1, 2]) for (const turn of [0, 1]) {
+    const kr = makeShip('kraken', 3, -40, -100, 0), p = makePlayer(i, -40, -70, 0);
+    p.sail = 3; p.speed = p.maxSpeed;
+    const sl = krakenSteer(kr, [kr, p], r0);
+    for (let t = 0; t < 3 && sl.t > 0; t += 1 / 60) {
+      if (t >= 0.3) p.turnIn = turn;
+      stepShip(p, 1 / 60);
+      stepSlam(sl, 1 / 60, [p]);
+    }
+    assert.equal(p.hp < p.maxHp, !turn, `${PLAYER_SHIPS[i].name} ${turn ? 'turning hard should dodge' : 'holding course should be hit'}`);
+  }
+  // left alone, it always picks a wander point it can reach: off every island
+  for (const m of ['waves', 'convoy']) {
+    setMap(m);
+    for (let i = 0; i < 300; i++) {
+      const kr = makeShip('kraken', 3, 0, 0, 0);
+      krakenSteer(kr, [kr]);
+      assert.ok(!ISLANDS.some((I) => Math.hypot(kr.wander.x - I.x, kr.wander.z - I.z) < I.r + 10), 'wander point on an island (' + m + ')');
+    }
+  }
+  setMap('waves');
   // pirate and navy broadsides both hit it
   for (const team of [0, 1]) {
     const s = makeShip('galleon', team, 0, 0, 0), kr = makeShip('kraken', 3, 0, 26, 0);

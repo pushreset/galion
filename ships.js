@@ -386,11 +386,14 @@ export function buildKraken() {
 }
 // One tentacle slam (game.js): the group sits on the target spot; the arm (userData.arm) rises 7 units off it
 // and pivots at its base (rotation.z < 0) to fall across the spot.
+// Geometry shared by every slam (one every 3 s; game.js only scene.remove()s them), like the barrels'.
+const tentacleGeo = [0, 1, 2, 3].map((k) => new THREE.CylinderGeometry(0.9 - k * 0.2, 1.15 - k * 0.2, 2.6, 6));
 export function buildTentacle() {
   const g = new THREE.Group(), arm = new THREE.Group();
   arm.position.x = -7;
   for (let k = 0; k < 4; k++) {
-    const seg = cyl(0.9 - k * 0.2, 1.15 - k * 0.2, 2.6, KRAKEN[Math.min(2, k)]);
+    const seg = new THREE.Mesh(tentacleGeo[k], mat(KRAKEN[Math.min(2, k)]));
+    seg.castShadow = true;
     seg.position.set(k * 0.35, 1.3 + k * 2.4, 0);
     seg.rotation.z = -0.12 * k;
     arm.add(seg);
