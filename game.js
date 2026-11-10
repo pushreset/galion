@@ -130,7 +130,7 @@ let forts = [];
 function buildForts() {
   for (const f of forts) f.bar?.remove();
   scene.updateMatrixWorld(true);
-  forts = world.forts.map((w) => Object.assign(makeFort(w.isl.x, w.isl.z, (4.2 * w.isl.r) / 13 + 1), {
+  forts = world.forts.map((w) => Object.assign(makeFort(w.isl.x, w.isl.z, (4.2 * w.isl.r) / 13 + 1, w.isl), {
     turrets: w.cannons.map((c) => {
       const p = c.getWorldPosition(new THREE.Vector3());
       return Object.assign(makeTurret(p.x, p.y + 0.4, p.z), { mesh: c });

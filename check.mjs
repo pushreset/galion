@@ -212,6 +212,21 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   for (const b of fireBroadside(s, 1, r0)) for (let i = 0; i < 600; i++) if (stepBall(b, 1 / 120, [f])) break;
   assert.ok(f.hp < f.maxHp, 'fort cannot be hit');
 }
+// a fort on its real island: the island doesn't swallow balls fired at the fort, nor the fort's own shots
+{
+  const I = ISLANDS.find((i) => i.kind === 'fort'), f = makeFort(I.x, I.z, 5.2, I);
+  const s = makePlayer(1);
+  Object.assign(s, { x: I.x - 30, z: I.z, h: -Math.PI / 2 }); // fort abeam to starboard
+  for (const b of fireBroadside(s, 1, r0)) for (let i = 0; i < 1200; i++) if (stepBall(b, 1 / 120, [f])) break;
+  assert.ok(f.hp < f.maxHp, 'fort on its island cannot be hit');
+  const t = makeTurret(I.x - 4.3, 7, I.z);
+  t.reload = 0;
+  const tgt = makeShip('brig', 0, I.x - 35, I.z, 0);
+  const b = fireTurret(t, tgt, 0, () => 0.5);
+  let ev = null;
+  for (let i = 0; i < 600 && !ev; i++) ev = stepBall(b, 1 / 60, [tgt, f]);
+  assert.ok(ev && ev.hit === tgt, 'fort shot stopped by its own island');
+}
 // merchants: progression, flee, escape, only armed ones fight back once hit
 {
   assert.equal(merchantSpec(1).length, 0);

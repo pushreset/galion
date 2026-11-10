@@ -192,7 +192,7 @@ export function stepBall(b, dt, ships) {
     if (!s.alive || allied(s.team, b.team)) continue;
     const dx = b.x - s.x, dz = b.z - s.z, c = Math.cos(s.h), sn = Math.sin(s.h);
     const lx = dx * c + dz * sn, lz = -dx * sn + dz * c;
-    if (Math.abs(lx) < s.len / 2 && Math.abs(lz) < s.beam * 0.6) {
+    if (s.isl ? Math.hypot(dx, dz) < shoreR(s.isl, Math.atan2(dz, dx)) : Math.abs(lx) < s.len / 2 && Math.abs(lz) < s.beam * 0.6) { // a fort: its whole island
       s.lastHit = b.team; // kill credit (PvP)
       damage(s, b.dmg);
       if (b.ammo?.id === 'chain') s.slowT = Math.max(s.slowT, 3 * b.ammo.p);
@@ -200,8 +200,10 @@ export function stepBall(b, dt, ships) {
       return { hit: s };
     }
   }
-  // islands stop balls (same footprint-only rule; the fort is a ship-shaped target, tested above)
+  // islands stop balls (same footprint-only rule; a standing fort is tested above, over its island).
+  // The fort's own side (navy) fires from / over the fort island, so it doesn't stop their balls.
   for (const isl of ISLANDS) {
+    if (isl.kind === 'fort' && allied(b.team, 1)) continue;
     const dx = b.x - isl.x, dz = b.z - isl.z;
     if (Math.hypot(dx, dz) < shoreR(isl, Math.atan2(dz, dx))) return { land: true };
   }
@@ -358,8 +360,9 @@ export function captureReward(p, e, b) {
 
 // --- fort ---------------------------------------------------------------------
 // The fort is a square, ship-shaped target (h 0, footprint len × beam·1.2) so stepBall/damage just work.
-export function makeFort(x, z, half) {
-  return { type: 'fort', team: 1, x, z, h: 0, len: half * 2, beam: (half * 2) / 1.2, hp: 300, maxHp: 300, alive: true, gold: 120, calm: 0, armorT: 0, slowT: 0, burnT: 0, backAt: 0 };
+// isl (its island): stepBall then hits it anywhere on the island, which would otherwise stop the ball first.
+export function makeFort(x, z, half, isl) {
+  return { type: 'fort', team: 1, x, z, h: 0, isl, len: half * 2, beam: (half * 2) / 1.2, hp: 300, maxHp: 300, alive: true, gold: 120, calm: 0, armorT: 0, slowT: 0, burnT: 0, backAt: 0 };
 }
 export function makeTurret(x, y, z) {
   return { x, y, z, reload: 2 + Math.random() * 2, reloadTime: 4.5, range: 46, team: 1, aim: 0 };
