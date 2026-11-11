@@ -20,13 +20,14 @@ fit();
 //   render(el, props) → { acts: { [data-f]: fn(el) }, keys(e) → true when handled, back(), tab(dir), close() } }
 export const screens = {};
 const stack = []; // { id, props, focus, h }
-let onChange = () => {};
-export const setOnChange = (f) => (onChange = f);
+let onChange = () => {}, onKey = () => {};
+export const setOnChange = (f) => (onChange = f); // a screen opened or closed, or the keyboard layout is known
+export const setOnKey = (f) => (onKey = f); // a key no screen used, outside a text field (the game's mute key)
 export const active = () => stack.length > 0;
 export const top = () => stack.at(-1)?.id;
 export const shot = () => { const t = stack.at(-1); return (t && screens[t.id].shot?.(t.props)) || null; };
 
-const FOCUS = 'button:not(:disabled), input:not(:disabled), [tabindex="0"]';
+const FOCUS = 'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), [tabindex="0"]'; // tabindex -1: mouse only (slider steps)
 const layer = () => modalEl.firstElementChild || host;
 const items = () => [...layer().querySelectorAll(FOCUS)].filter((el) => el.offsetParent !== null);
 const focused = () => (layer().contains(document.activeElement) ? document.activeElement : null);
@@ -92,14 +93,18 @@ function tab(d) {
   const g = groups[(groups.findIndex((x) => x.contains(focused())) + d + groups.length) % groups.length];
   focus(g.querySelector('[aria-selected="true"], [aria-pressed="true"], [data-first]') || g.querySelector(FOCUS));
 }
-stage.addEventListener('mouseover', (e) => {
+// The mouse takes the focus when it moves, not when a screen is redrawn under a pointer at rest (the browser sends a mouseover then too).
+let mx = -1, my = -1;
+stage.addEventListener('mousemove', (e) => {
+  if (e.screenX === mx && e.screenY === my) return;
+  mx = e.screenX; my = e.screenY;
   const el = e.target.closest(FOCUS);
   if (el && el !== document.activeElement && layer().contains(el)) el.focus({ preventScroll: true });
 });
 stage.addEventListener('click', (e) => {
   const el = e.target.closest('[data-f]');
   if (!el || el.disabled || !layer().contains(el)) return;
-  (modalEl.firstElementChild ? modalActs : stack.at(-1)?.h.acts)?.[el.dataset.f]?.(el);
+  (modalEl.firstElementChild ? modalActs : stack.at(-1)?.h.acts)?.[el.dataset.f]?.(el, e);
 });
 // The one keydown of the menus (game.js routes it here while a screen is open). Returns nothing; handled keys are kept from the browser.
 export function key(e) {
@@ -118,7 +123,9 @@ export function key(e) {
   if (e.code === 'Enter' || e.code === 'NumpadEnter' || (e.code === 'Space' && !typing)) {
     done();
     if (!e.repeat && a && a.tagName !== 'INPUT') a.click();
+    return;
   }
+  if (!typing && !e.repeat) onKey(e);
 }
 
 // --- messages -----------------------------------------------------------------
@@ -157,9 +164,11 @@ let layout = null; // Chromium only; elsewhere: the event.key seen when the key 
 navigator.keyboard?.getLayoutMap?.().then((m) => { layout = m; onChange(); refresh(); }).catch(() => {});
 export function keyLabel(code) {
   if (NAMES[code]) return NAMES[code];
+  if (/^Digit\d$/.test(code)) return code[5]; // the digit printed on the key, not AZERTY's unshifted & é " '
   const l = layout?.get(code) ?? store.keyNames[code];
   return (l && l.trim() ? l : code.replace(/^(Key|Digit)/, '').replace(/^Numpad/, 'NUM ')).toUpperCase();
 }
 // the code of the key that types `ch` on this keyboard, when the browser tells
 export const codeFor = (ch) => { for (const [code, k] of layout || []) if (k === ch) return code; return null; };
+export const hasLayout = () => !!layout;
 export const layoutName = () => (!layout ? '' : layout.get('KeyQ') === 'a' ? 'AZERTY' : layout.get('KeyY') === 'z' ? 'QWERTZ' : layout.get('KeyQ') === 'q' ? 'QWERTY' : '');

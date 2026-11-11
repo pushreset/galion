@@ -237,3 +237,9 @@
 .bs-over-row > :nth-child(n+3) { text-align: right; }
 .bs-over-row.is-you { padding: 6px 8px; font-size: 16px; line-height: 16px; color: var(--bs-gold); background: var(--bs-wood-hi); box-shadow: inset 0 0 0 2px var(--bs-gold); }
 .bs-over-up { font-size: 8px; color: var(--bs-green); }
+
+/* settings: a key row, and the banner under the grid (listening, conflict) */
+.bs-keyrow { justify-content: space-between; padding: 4px 8px; }
+.bs-keyrow.is-on { color: var(--bs-gold); background: var(--bs-wood-hi); box-shadow: inset 0 0 0 2px var(--bs-gold); }
+.bs-keyrow.is-bad { box-shadow: inset 0 0 0 2px var(--bs-red); }
+.bs-banner { gap: 8px; padding: 6px 10px; background: var(--bs-wood-edge); }

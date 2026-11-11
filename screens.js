@@ -2,7 +2,7 @@
 // g: what game.js lends the menus (ships, start a run, sound…); the menus never import the game.
 import * as ui from './ui.js';
 import { screens, esc, keyLabel } from './ui.js';
-import { store, cleanName, rollName, SHIPS } from './store.js';
+import { store, cleanName, rollName, rebind, swapKeys, DEFAULT_KEYS, SHIPS } from './store.js';
 
 const mine = (row, name) => row.crew.some((c) => c.name === name);
 
@@ -41,6 +41,9 @@ const MODE = {
       rect([[36, 20, 3, 1], [44, 5, 4, 1]], '#f4fffb') + rect([[13, 4, 4, 1]], '#2f87bb')) },
 };
 const STATS = ['SPEED', 'HANDLING', 'HULL', 'GUNS', 'RELOAD', 'CREW'];
+const KEY_ROWS = [[['sailUp'], 'SAIL UP'], [['sailDown'], 'SAIL DOWN'], [['turnLeft'], 'TURN LEFT'], [['turnRight'], 'TURN RIGHT'], [['firePort'], 'FIRE PORT (LEFT)'], [['fireStarboard'], 'FIRE STARBOARD (RIGHT)'],
+  [['skill1', 'skill2', 'skill3', 'skill4'], 'SKILLS 1 TO 4'], [['board'], 'BOARD'], [['overview'], 'OVERVIEW (ZOOM)'], [['mute'], 'MUTE'], [['pause'], 'PAUSE']];
+const actionLabel = (a) => (a.startsWith('skill') ? 'SKILL ' + a.slice(5) : KEY_ROWS.find(([ids]) => ids[0] === a)[1]);
 
 export function initScreens(g) {
   // 01 · the first key or click unlocks the browser's audio; it must not act on the screen that follows
@@ -223,6 +226,7 @@ export function initScreens(g) {
     veil: 0.55,
     hints: () => [[g.pauseKeys(), 'RESUME'], [['↑', '↓'], 'CHOOSE'], [['ENTER'], 'CONFIRM']],
     render(el, props) {
+      g.pauseAudio(true); // back from the settings
       el.innerHTML = `${props.online ? '<div class="bs-abs bs-toast bs-toast--warn" role="status" style="left:260px;top:16px;width:440px;justify-content:center"><b>!</b> ONLINE : THE SEA DOES NOT STOP. YOUR SHIP DRIFTS.</div>' : ''}
         <div class="bs-abs bs-panel bs-menu" role="dialog" aria-label="Paused" style="left:320px;top:${props.confirm ? 96 : 132}px;width:320px;padding:20px">
           <h1 style="margin-bottom:4px;text-align:center;font-size:40px;line-height:40px;font-weight:700;letter-spacing:3px;text-shadow:3px 3px 0 var(--bs-wood-edge)">PAUSED</h1>
@@ -232,8 +236,112 @@ export function initScreens(g) {
             <div class="bs-row" style="gap:8px"><button class="bs-btn bs-btn--s bs-btn--danger" data-f="yes" style="padding:6px 10px">YES, QUIT</button><button class="bs-btn bs-btn--s" data-f="stay" style="padding:6px 10px">STAY ABOARD</button></div></div>` : ''}</div>`;
       const ask = (on) => { props.confirm = on; ui.refresh(); ui.focus(on ? 'stay' : 'quit'); };
       const back = () => (props.confirm ? ask(false) : g.resume());
-      return { back, acts: { resume: g.resume, settings: () => ui.open('settings', { from: 'pause' }), quit: () => ask(true), yes: () => g.reboot('menu'), stay: () => ask(false) },
+      return { back, acts: { resume: g.resume, settings: () => { g.pauseAudio(false); ui.open('settings', { from: 'pause' }); }, quit: () => ask(true), yes: () => g.reboot('menu'), stay: () => ask(false) },
         keys(e) { if (!g.isPause(e.code)) return false; if (!e.repeat) g.resume(); return true; } };
+    },
+  };
+
+  // 08 · settings: everything is kept as soon as it changes. props: { tab, from: 'pause' }
+  screens.settings = {
+    veil: 0.6, shot: () => ({ wide: true }),
+    hints: [[['↑', '↓'], 'CHOOSE'], [['←', '→'], 'ADJUST'], [['TAB'], 'NEXT SECTION'], [['ESC'], 'BACK']],
+    render(el, props) {
+      props.tab ??= 'audio';
+      const TABS = [['audio', 'AUDIO'], ['controls', 'CONTROLS'], ['display', 'DISPLAY'], ['profile', 'PROFILE']];
+      el.innerHTML = `<div class="bs-abs bs-col" style="left:106px;top:28px;gap:4px"><div class="bs-crumb">${props.from === 'pause' ? 'PAUSE' : 'MENU'} ▸ SETTINGS</div><h1 class="bs-h1">SETTINGS</h1></div>
+        <div class="bs-abs bs-panel bs-row" style="left:106px;top:92px;width:748px;height:396px;align-items:stretch">
+          <div class="bs-tabs bs-tabs--v" role="tablist" aria-orientation="vertical" data-group style="width:160px;padding:16px 0 16px 16px;border-right:2px solid var(--bs-wood-edge)">
+            ${TABS.map(([id, l]) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.tab}"${id === props.tab ? ' data-first' : ''}>${l}</button>`).join('')}</div>
+          <div class="bs-col" data-group style="flex:1;min-width:0;padding:20px 24px;gap:12px"><div id="set-body" class="bs-col" style="gap:12px"></div>
+            <div class="bs-row" style="margin-top:auto;justify-content:space-between"><button class="bs-btn" data-f="back">◀ BACK</button><span style="color:var(--bs-green)">✓ SAVED AUTOMATICALLY</span></div></div></div>`;
+      const body = el.querySelector('#set-body'), acts = { back: ui.pop };
+      const switchHtml = (f, on, label, danger) => `<button class="bs-switch${danger ? ' bs-switch--danger' : ''}" role="switch" data-f="${f}" aria-checked="${on}" aria-label="${label}"><span></span></button>`;
+      const paint = {
+        audio() {
+          const a = store.audio;
+          const set = (k, v) => { a[k] = Math.max(0, Math.min(10, v)); store.audio = a; g.setAudio(a); draw('v-' + k); };
+          body.innerHTML = [['master', 'MASTER'], ['music', 'MUSIC'], ['fx', 'EFFECTS']].map(([k, l]) => `<div class="bs-row" style="gap:12px;font-size:16px;line-height:16px"><span style="width:104px">${l}</span>
+            <button class="bs-step" tabindex="-1" data-f="d-${k}" aria-label="${l} down">◀</button><div class="bs-slider${a.muted ? ' is-muted' : ''}" role="slider" tabindex="0" data-f="v-${k}" aria-label="${l}" aria-valuemin="0" aria-valuemax="10" aria-valuenow="${a[k]}">${Array.from({ length: 10 }, (_, i) => `<span${i < a[k] ? ' class="is-on"' : ''}></span>`).join('')}</div>
+            <button class="bs-step" tabindex="-1" data-f="u-${k}" aria-label="${l} up">▶</button><span style="width:44px;text-align:right;color:var(--${a.muted ? 'bs-trim' : 'bs-gold'})">${a[k] * 10}%</span>${k === 'fx' ? '<button class="bs-btn bs-btn--s" data-f="test">▶ TEST</button>' : ''}</div>`).join('') +
+            `<div class="bs-row" style="gap:12px;padding-top:16px;border-top:2px solid var(--bs-wood-edge)"><span style="width:104px;font-size:16px;line-height:16px">MUTE ALL</span>${switchHtml('mute', a.muted, 'Mute all sound', true)}
+              <span class="bs-dim">SOUND IS ${a.muted ? 'OFF' : 'ON'} · ${key(g.muteLabel())} ANYWHERE</span></div>
+            <p class="bs-dim">MUSIC GAINS DRUMS IN COMBAT. SEA AMBIENCE FOLLOWS EFFECTS.</p>`;
+          for (const k of ['master', 'music', 'fx']) {
+            acts['d-' + k] = () => set(k, a[k] - 1);
+            acts['u-' + k] = () => set(k, a[k] + 1);
+            acts['v-' + k] = (sl, e) => { const i = [...sl.children].indexOf(e.target); if (i >= 0) set(k, i + 1); }; // a click on a notch
+            body.querySelector(`[data-f=v-${k}]`).onkey = (e) => { const d = { ArrowLeft: -1, ArrowRight: 1 }[e.code]; if (d) set(k, a[k] + d); return !!d; };
+          }
+          acts.test = () => g.testFx();
+          acts.mute = () => { a.muted = !a.muted; store.audio = a; g.setAudio(a); draw('mute'); };
+        },
+        controls() {
+          const keys = g.keys(), L = props.listen, C = props.conflict, name = ui.layoutName();
+          const cap = (a) => `<button class="bs-keycap${a === L ? ' is-listening' : ''}${C && (a === C.action || a === C.other) ? ' is-conflict' : ''}" data-f="k-${a}" aria-label="Change key for ${actionLabel(a)}">${a === L ? 'PRESS A KEY…' : esc(keyLabel(C && a === C.action ? C.code : keys[a]))}</button>`;
+          body.innerHTML = `<div class="bs-row" style="justify-content:space-between"><span class="bs-dim">KEYS SHOWN FOR YOUR KEYBOARD${name ? ` : <span class="bs-gold">${name}</span>` : ''}</span><button class="bs-btn bs-btn--s" data-f="k-reset">RESET TO DEFAULTS</button></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px">${KEY_ROWS.map(([ids, l]) => {
+              const on = ids.includes(L) || (C && ids.includes(C.action)), bad = C && (ids.includes(C.action) || ids.includes(C.other));
+              return `<div class="bs-row bs-keyrow${on ? ' is-on' : ''}${bad ? ' is-bad' : ''}"><span>${l}</span><span class="bs-row" style="gap:4px">${ids.map(cap).join('')}</span></div>`;
+            }).join('')}</div>
+            ${L ? `<div class="bs-row bs-banner" style="box-shadow:inset 0 0 0 2px var(--bs-${props.note ? 'red' : 'gold'})"><span style="flex:1">${props.note ? `<span style="color:var(--bs-red)">${props.note}.</span> ` : ''}PRESS THE NEW KEY FOR <span class="bs-gold">${actionLabel(L)}</span></span><span class="bs-dim">${key('ESC')} CANCEL</span><button class="bs-btn bs-btn--s" data-f="k-cancel">CANCEL</button></div>` : ''}
+            ${C ? `<div class="bs-row bs-banner" role="alert" style="box-shadow:inset 0 0 0 2px var(--bs-red)"><span style="flex:1"><span style="color:var(--bs-red)">${esc(keyLabel(C.code))}</span> ALREADY SETS <span class="bs-gold">${actionLabel(C.other)}</span>. SWAP THEM ?</span><button class="bs-btn bs-btn--s" data-f="k-swap">SWAP KEYS</button><button class="bs-btn bs-btn--s" data-f="k-cancel">CANCEL</button></div>` : ''}`;
+          const save = (k) => { store.keys = k; g.rekey(); };
+          const state = (listen, conflict, note, focus) => { Object.assign(props, { listen, conflict, note }); draw(focus); };
+          for (const a of Object.keys(DEFAULT_KEYS)) acts['k-' + a] = () => state(a, null, '', 'k-' + a);
+          acts['k-cancel'] = () => state(null, null, '', 'k-' + (L || C.action));
+          acts['k-swap'] = () => { save(swapKeys(keys, C.action, C.other)); state(null, null, '', 'k-' + C.action); };
+          acts['k-reset'] = () => ui.modal({ title: 'RESET KEYS ?', text: 'EVERY KEY GOES BACK TO ITS DEFAULT.', buttons: [{ label: 'CANCEL', cancel: true }, { label: 'RESET TO DEFAULTS', danger: true, run: () => { save(DEFAULT_KEYS); state(null, null, '', 'k-reset'); } }] });
+          props.grab = !L ? null : (e) => { // the next key down is the new one; Escape gives up
+            if (e.repeat) return;
+            if (e.code === 'Escape') return acts['k-cancel']();
+            const r = rebind(keys, L, e.code);
+            if (r.reserved) return state(L, null, 'RESERVED KEY', 'k-' + L);
+            if (e.key.length === 1) store.keyNames = { ...store.keyNames, [e.code]: e.key }; // its label, for browsers that do not tell the layout
+            if (r.conflict) return state(null, { action: L, other: r.conflict, code: e.code }, '', 'k-swap');
+            save(r.keys);
+            state(null, null, '', 'k-' + L);
+          };
+        },
+        display() {
+          const d = store.display;
+          const row = (l, sw, note) => `<div class="bs-row" style="gap:12px"><span style="width:176px;font-size:16px;line-height:16px">${l}</span>${sw}<span class="bs-dim">${note}</span></div>`;
+          body.innerHTML = row('FULLSCREEN', switchHtml('full', !!document.fullscreenElement, 'Fullscreen'), `ALSO ${key('F11')}`) + row('KEY HINTS BAR', switchHtml('hints', d.hints, 'Key hints bar'), 'THE STRIP AT THE BOTTOM IN GAME');
+          acts.full = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen())?.catch(() => {});
+          acts.hints = () => { store.display = { hints: !d.hints }; g.rekey(); draw('hints'); };
+        },
+        profile() {
+          body.innerHTML = `<label class="bs-dim" for="set-name">CAPTAIN NAME</label>
+            <div class="bs-row" style="gap:8px"><input id="set-name" class="bs-field" data-f="name" maxlength="12" autocomplete="off" spellcheck="false" style="width:280px;height:40px;font-size:24px;letter-spacing:3px"><button class="bs-btn" data-f="roll">⟳ ROLL</button><button class="bs-btn" data-f="save">SAVE</button></div>
+            <p class="bs-dim">A TO Z, 12 LETTERS MAX. SCORES ALREADY ON THE BOARD KEEP THE NAME THEY WERE SIGNED WITH.</p>`;
+          const input = body.querySelector('input'), btn = body.querySelector('[data-f=save]');
+          const show = () => { btn.disabled = !input.value || input.value === store.name; };
+          input.value = store.name;
+          input.oninput = () => { const v = cleanName(input.value); if (v !== input.value) input.value = v; show(); };
+          show();
+          acts.roll = () => { input.value = rollName(); show(); };
+          acts.save = () => { if (btn.disabled) return; store.name = input.value; show(); ui.focus('name'); ui.toast('ok', 'NAME SAVED · ' + input.value); };
+          props.field = input;
+        },
+      };
+      // one tab's content again, the focus back on `focus`
+      function draw(focus) {
+        props.grab = props.field = null;
+        for (const t of el.querySelectorAll('.bs-tab')) t.setAttribute('aria-selected', t.dataset.f === 't-' + props.tab);
+        paint[props.tab]();
+        if (focus) ui.focus(focus);
+      }
+      for (const [id] of TABS) {
+        acts['t-' + id] = () => {};
+        el.querySelector(`[data-f=t-${id}]`).onfocus = () => { if (props.tab !== id) { Object.assign(props, { tab: id, listen: null, conflict: null, note: '' }); draw(); } }; // a tab is chosen by focusing it
+      }
+      draw();
+      const onFull = () => props.tab === 'display' && draw('full');
+      document.addEventListener('fullscreenchange', onFull);
+      return { acts, close: () => document.removeEventListener('fullscreenchange', onFull), keys(e) {
+        if (props.grab && !e.ctrlKey && !e.metaKey) { props.grab(e); return true; }
+        if (props.field && e.target === props.field) { if (e.code === 'Enter') { if (!e.repeat) acts.save(); return true; } return nameKey(e, props.field); }
+        return false;
+      } };
     },
   };
 }

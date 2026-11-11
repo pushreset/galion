@@ -80,7 +80,7 @@
   .slot.armed { border-color: #ffd24a; box-shadow: inset 0 0 0 3px #ff9b26; }
   .slot.locked { opacity: 0.5; } .slot.locked b { font-size: 22px; font-weight: normal; color: #b9a57d; }
   body.selecting #stats, body.selecting #score, body.selecting #radar-box, body.selecting #skills { display: none; }
-  body.menus #select, body.menus #help { display: none; } /* a menu screen is open (ui.js) */
+  body.menus #select, body.menus #help, #help[hidden] { display: none; } /* a menu screen is open (ui.js) */
   #lobby { width: 0; min-width: 100%; margin-top: 12px; font-size: 12px; pointer-events: auto; display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
   #lobby button, #lobby input { font: inherit; color: #f5ecd2; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 2px #ad7a48; padding: 4px 10px; cursor: pointer; }
   #lobby input { width: 64px; text-transform: uppercase; text-align: center; cursor: text; }
@@ -109,8 +109,8 @@
 <div id="stats" class="hud panel">
   <span>HULL</span><div class="bar"><i id="hp"></i></div>
   <span>SAIL</span><div class="bar"><i id="sail"></i></div>
-  <span><kbd>A</kbd> PORT</span><div class="bar"><i id="rp"></i></div>
-  <span><kbd>E</kbd> STAR</span><div class="bar"><i id="rs"></i></div>
+  <span><kbd id="k-port"></kbd> PORT</span><div class="bar"><i id="rp"></i></div>
+  <span><kbd id="k-star"></kbd> STAR</span><div class="bar"><i id="rs"></i></div>
   <span>CREW <b id="crewn"></b></span><div class="bar"><i id="crew"></i></div>
 </div>
 <div id="score" class="hud panel"><div id="pvp" hidden></div><div id="coop">GOLD <b id="gold">0</b><br><span id="wave-l">WAVE</span> <b id="wave">0</b><span id="navy" hidden><br>NAVY GOLD <b id="delivered">0</b></span></div><div id="combo" hidden>COMBO <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
@@ -125,10 +125,10 @@
   <div id="b-line"><i id="b-zone"></i><i id="b-target"></i><i id="b-cursor"></i></div>
   <div class="bar" id="b-timebar"><i id="b-time"></i></div>
   <div id="b-msg"></div>
-  <div class="b-help"><kbd>SPACE</kbd> when the cursor is on the gold mark</div>
+  <div class="b-help"><kbd id="k-board"></kbd> when the cursor is on the gold mark</div>
 </div>
 <div id="cards" class="hud panel" hidden><h2>Refit your ship: click or press 1, 2 or 3</h2><div id="cards-list"></div></div>
-<div id="help" class="hud panel"><kbd>↑</kbd>/<kbd>↓</kbd> sail up/down · <kbd>←</kbd>/<kbd>→</kbd> turn · <kbd>A</kbd> fire left · <kbd>E</kbd> fire right · <kbd>1</kbd>-<kbd>4</kbd> skills · <kbd>Space</kbd> board · <kbd>M</kbd> sound · <kbd>C</kbd> zoom · <kbd>P</kbd> pause</div>
+<div id="help" class="hud panel"></div>
 <script type="module" src="game.js"></script>
 </body>
 </html>

@@ -4,11 +4,11 @@ import { createSea } from './water.js';
 import { buildShip, setGuns, buildTentacle } from './ships.js';
 import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
-import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
+import { sfx, unlock, setAudio, setPaused, setCombat } from './sfx.js';
 import { hostRoom, joinRoom, match, worldScores, MAX_PLAYERS } from './net.js';
 import * as ui from './ui.js';
 import { initScreens } from './screens.js';
-import { store, SHIPS, boardOf, better, normRow, signLocal, markWorld } from './store.js';
+import { store, SHIPS, DEFAULT_KEYS, boardOf, normRow, signLocal, markWorld } from './store.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
   const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
@@ -125,7 +125,7 @@ const PREVIEW = PLAYER_SHIPS.map((p, i) => {
 });
 const players = []; // every pirate ship (local + remote); the sim treats them all alike
 let me = null; // the ship this browser steers and looks at
-const localInput = () => ({ turn: (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0), fireL: held.has('KeyQ'), fireR: held.has('KeyE') });
+const localInput = () => ({ turn: (held.has('turnRight') ? 1 : 0) - (held.has('turnLeft') ? 1 : 0), fireL: held.has('firePort'), fireR: held.has('fireStarboard') });
 // enemies chase whichever pirate is closest (a sunk one only if nobody is left afloat)
 function nearestPlayer(o) {
   let best = players[0], bd = Infinity;
@@ -185,10 +185,35 @@ function fortUp(fort) {
 // game flow: fight → lull → pick (upgrade cards) → between → fight … | dead
 const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0, delivered: 0, escorts: 0, port: 0, convoyN: 0, krakenAt: Infinity }; // krakenAt: state.t (waves) / time (PvP) the kraken surfaces // delivered: gold merchants got to port (convoy mode), it pays for more escorts
 
-// input: arrows steer; the rest are physical key codes, so fire is A/E on AZERTY and Q/E on QWERTY
+// input: every game key is an action looked up by physical key code (store.js DEFAULT_KEYS, changed in the settings screen),
+// so fire is A/E on AZERTY and Q/E on QWERTY. `held`: the actions whose key is down.
 const held = new Set();
-const GAME_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC', 'KeyP']);
+let keys = {}, actionOf = {};
+function rekey() {
+  keys = store.keys;
+  // M sits on another physical key in AZERTY: until the player picks a key, mute is the key that types M when the browser knows it
+  if (keys.mute === DEFAULT_KEYS.mute) keys.mute = ui.codeFor('m') || DEFAULT_KEYS.mute;
+  actionOf = Object.fromEntries(Object.entries(keys).map(([a, c]) => [c, a]));
+  const k = (a) => `<kbd>${ui.esc(ui.keyLabel(keys[a]))}</kbd>`;
+  $('help').innerHTML = `${k('sailUp')}/${k('sailDown')} sail up/down · ${k('turnLeft')}/${k('turnRight')} turn · ${k('firePort')} fire left · ${k('fireStarboard')} fire right · ${k('skill1')}-${k('skill4')} skills · ${k('board')} board · ${k('mute')} sound · ${k('overview')} zoom · ${k('pause')} pause`;
+  $('help').hidden = !store.display.hints;
+  $('k-port').textContent = ui.keyLabel(keys.firePort);
+  $('k-star').textContent = ui.keyLabel(keys.fireStarboard);
+  $('k-board').textContent = ui.keyLabel(keys.board);
+  skillSig = cardSig = ''; // their key labels are redrawn
+}
+// the numpad digits follow the digit row. Mute: where the browser does not tell the layout (Firefox, Safari), the default is whatever key types M
+const actionFor = (e) => actionOf[e.code.replace(/^Numpad(\d)$/, 'Digit$1')] || (keys.mute === DEFAULT_KEYS.mute && !ui.hasLayout() && /^m$/i.test(e.key) ? 'mute' : undefined);
+function toggleMute() {
+  const a = store.audio;
+  a.muted = !a.muted;
+  store.audio = a;
+  setAudio(a);
+  if (ui.top() === 'settings') ui.refresh();
+}
+addEventListener('pointerdown', () => paused || unlock()); // a reload skips the title: the first click or key of the page unlocks the audio
 addEventListener('keydown', (e) => {
+  if (!paused) unlock(); // paused: the audio clock stays stopped
   if (ui.active()) { // a menu screen is open: every key is its own (a text field keeps its characters)
     if (e.target.tagName !== 'INPUT' && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
     return ui.key(e);
@@ -200,27 +225,26 @@ addEventListener('keydown', (e) => {
     e.target.blur();
   }
   // Firefox's find-as-you-type opens its search bar on any typed character: a wrong letter, or M, whose code depends on the layout.
-  // So every character is kept from the browser, not only GAME_KEYS. Ctrl / Cmd / Alt shortcuts still pass.
+  // So every character is kept from the browser, not only the game's keys. Ctrl / Cmd / Alt shortcuts still pass.
   if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
   if (e.target.tagName === 'BUTTON') return; // a focused lobby button keeps Enter / Space (the click handlers blur it)
-  if (GAME_KEYS.has(e.code)) e.preventDefault();
+  const a = actionFor(e);
+  if (a || /^(Arrow\w+|Space|Enter|Backspace)$/.test(e.code)) e.preventDefault();
   if (e.repeat) return;
   if (e.code === 'Escape' && state.mode === 'select' && net === 'solo' && !quick) return ui.reset('menu'); // the old panel, until its screens exist
-  if (e.code === 'KeyP' || e.code === 'Escape') return openPause(); // Escape too, though fullscreen spends it on leaving fullscreen
-  unlock();
-  if (state.boarding) { if (e.code === 'Space') boardPress(); return; } // paused: Space is the only input
-  if (e.code === 'KeyC') overview = !overview; // same physical key on AZERTY
-  if (e.key === 'm' || e.key === 'M') toggleMute(); // e.key: M sits on a different physical key in AZERTY
-  held.add(e.code);
-  // physical digit codes: AZERTY users don't need Shift
-  const pick = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3 }[e.code];
+  if (a === 'pause' || e.code === 'Escape') return openPause(); // Escape too, though fullscreen spends it on leaving fullscreen
+  if (state.boarding) { if (a === 'board') boardPress(); return; } // the world is stopped: boarding is the only input
+  if (a === 'overview') overview = !overview;
+  if (a === 'mute') toggleMute();
+  if (a) held.add(a);
+  const pick = { skill1: 0, skill2: 1, skill3: 2, skill4: 3 }[a];
   if (net === 'guest' ? guestShip === null : state.mode === 'select') {
     if (pick < 3 && (net === 'solo' ? !quick : net === 'guest' ? myPid : roomOpen)) choosePlayer(pick); // solo: not while quick match searches; guest: only once the host said hi; host: once the room is open
     return;
   }
   if (e.code === 'Enter' && net === 'host') return sail();
-  const msg = e.code === 'Space' && state.mode !== 'pick' ? { t: 'board' }
-    : e.code === 'ArrowUp' ? { t: 'sail', d: 1 } : e.code === 'ArrowDown' ? { t: 'sail', d: -1 }
+  const msg = a === 'board' && state.mode !== 'pick' ? { t: 'board' }
+    : a === 'sailUp' ? { t: 'sail', d: 1 } : a === 'sailDown' ? { t: 'sail', d: -1 }
     : pick !== undefined ? (me?.cards?.length ? { t: 'card', i: pick } : { t: 'skill', i: pick }) : null;
   if (!msg) return;
   if (net !== 'guest') { if (me) act(me, msg); return; }
@@ -285,10 +309,7 @@ addEventListener('blur', () => { // alt-tab: pause solo, release the keys online
   if (net === 'guest' && guestShip !== null) sendInput(); // now: a hidden tab runs no frames
 });
 
-addEventListener('keyup', (e) => {
-  if (GAME_KEYS.has(e.code)) e.preventDefault();
-  held.delete(e.code);
-});
+addEventListener('keyup', (e) => held.delete(actionFor(e)));
 
 let iw = 2, ih = 2, texel = 1;
 function resize() {
@@ -316,7 +337,7 @@ const camTarget = new THREE.Vector3();
 function updateCamera(dt, snapNow) {
   const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // old select panel: aim below the row so ships sit above the cards
   // a menu screen frames the scene behind it: { orbit } the three ships turning, { ship, side } one of them on the left (-1) or right (1), else the open sea
-  const sh = ui.shot(), ship = sh && PREVIEW[sh.ship];
+  const sh = state.mode === 'select' ? ui.shot() : null, ship = sh && PREVIEW[sh.ship]; // not under a pause or end screen
   if (sh?.orbit) setAz(camAz + dt * 0.05); else if (camAz !== CAM_AZ) setAz(CAM_AZ);
   for (const s of PREVIEW) s.mesh.root.visible = !ship || s === ship; // one ship framed: her sisters are not peeking from under the panels
   const wantH = sh ? (ship ? 30 : sh.orbit ? 48 : 64) : overview ? MAP.view : VIEW_H;
@@ -497,7 +518,7 @@ $('select-list').innerHTML = PREVIEW.map((s, i) =>
 // ponytail: replays the key handler so the lobby/pause/guest rules stay in one place
 for (const id of ['select-list', 'cards-list']) $(id).addEventListener('click', (e) => {
   const c = e.target.closest('.card');
-  if (c) dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit' + ([...c.parentNode.children].indexOf(c) + 1) }));
+  if (c) dispatchEvent(new KeyboardEvent('keydown', { code: keys['skill' + ([...c.parentNode.children].indexOf(c) + 1)] }));
 });
 function makePirate(s, pid, pick, name) {
   return Object.assign(s, { isPlayer: true, pid, pick, tag: nick(name) || 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
@@ -1091,14 +1112,14 @@ function hud() {
   $('board-hint').hidden = !bt;
   if (bt) {
     _p.set(bt.x, bt.len * 0.95, bt.z).project(camera);
-    $('board-hint').textContent = bt.hp < 0.2 * bt.maxHp ? 'SPACE · BOARD (AUTO)' : 'SPACE · BOARD';
+    $('board-hint').textContent = `${ui.keyLabel(keys.board)} · BOARD${bt.hp < 0.2 * bt.maxHp ? ' (AUTO)' : ''}`;
     $('board-hint').style.transform = `translate(${Math.round(((_p.x + 1) / 2) * W)}px, ${Math.round(((1 - _p.y) / 2) * H) - 46}px) translateX(-50%)`;
   }
   // refit cards: each pirate picks their own
   const cards = me.cards || [], csig = cards.map((c) => c.id).join();
   if (csig !== cardSig) {
     cardSig = csig;
-    $('cards-list').innerHTML = cards.map((c, i) => `<div class="card"><kbd>${i + 1}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${c.label}</span></div>`).join('');
+    $('cards-list').innerHTML = cards.map((c, i) => `<div class="card"><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${c.label}</span></div>`).join('');
   }
   $('cards').hidden = !cards.length || state.mode === 'dead';
   skillHud();
@@ -1201,8 +1222,8 @@ function skillHud() {
     $('skills').innerHTML = [0, 1, 2, 3].map((i) => {
       const k = me.skills[i];
       return k
-        ? `<div class="slot"><img src="${ICON[k.id]}"><i class="cd"></i><kbd>${i + 1}</kbd><em>${'I'.repeat(k.lvl)}</em><span>${SKILLS[k.id].name}</span></div>`
-        : `<div class="slot locked"><b>?</b><kbd>${i + 1}</kbd><span>locked</span></div>`;
+        ? `<div class="slot"><img src="${ICON[k.id]}"><i class="cd"></i><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><em>${'I'.repeat(k.lvl)}</em><span>${SKILLS[k.id].name}</span></div>`
+        : `<div class="slot locked"><b>?</b><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><span>locked</span></div>`;
     }).join('');
   }
   me.skills.forEach((k, i) => {
@@ -1492,17 +1513,23 @@ $('quick-pvp').onclick = (e) => { e.currentTarget.blur(); quickGame('pvp'); };
 initScreens({
   ships: PREVIEW.map((s, i) => ({ name: s.name.toUpperCase(), blurb: PLAYER_SHIPS[i].blurb.toUpperCase(),
     gauges: shipStats(s).map(([, v]) => Math.round(v * 10)), skills: s.skills.map((k) => ({ name: SKILLS[k.id].name.toUpperCase(), icon: ICON[k.id] })) })),
-  unlock,
-  muteLabel: () => 'M',
+  unlock, setAudio, rekey,
+  keys: () => keys,
+  muteLabel: () => ui.keyLabel(keys.mute),
+  testFx: () => sfx.boom(1, 0),
+  pauseAudio: (on) => paused && setPaused(on), // settings opened from the pause: sound is back while it is open
   setMode: (m) => setConvoy(m === 'convoy'), // its map shows behind the ship screen
   startSolo,
   resume, reboot,
-  pauseKeys: () => ['P', 'ESC'],
-  isPause: (code) => code === 'KeyP',
+  pauseKeys: () => [ui.keyLabel(keys.pause), 'ESC'],
+  isPause: (code) => actionOf[code] === 'pause',
   oldPanel: () => ui.reset(),
 });
 function startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); }
-ui.setOnChange(() => document.body.classList.toggle('menus', ui.active()));
+ui.setOnChange(() => { document.body.classList.toggle('menus', ui.active()); rekey(); }); // rekey: labels follow the keyboard layout once the browser tells it
+ui.setOnKey((e) => { if (actionFor(e) === 'mute') toggleMute(); }); // the mute key works on every screen
+setAudio(store.audio);
+rekey();
 // broadside.boot: a reload asked for by the menus (a run starts from a fresh page) says where to land
 let boot = null;
 try { boot = sessionStorage.getItem('broadside.boot'); sessionStorage.removeItem('broadside.boot'); } catch {}
