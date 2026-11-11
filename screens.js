@@ -2,7 +2,7 @@
 // g: what game.js lends the menus (ships, start a run, sound…); the menus never import the game.
 import * as ui from './ui.js';
 import { screens, esc, keyLabel } from './ui.js';
-import { store, cleanName, rollName, rebind, swapKeys, DEFAULT_KEYS, SHIPS } from './store.js';
+import { store, cleanName, rollName, rebind, swapKeys, DEFAULT_KEYS, SHIPS, boardOf } from './store.js';
 
 const mine = (row, name) => row.crew.some((c) => c.name === name);
 
@@ -216,7 +216,7 @@ export function initScreens(g) {
           ${top.slice(from, from + 4).map((r, i) => row(r, from + i)).join('')}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-self:stretch">${props.online ? btn('crew', '▶ FIND A NEW CREW', 1) : btn('again', '▶ SAIL AGAIN', 1) + btn('ship', 'CHANGE SHIP')}${btn('board', 'LEADERBOARD')}${btn('menu', 'MAIN MENU')}</div></div>`;
       const acts = { again: () => g.reboot('sail'), ship: () => g.reboot('ship'), crew: () => g.reboot('online'), menu: () => g.reboot('menu'),
-        board: () => ui.open('leaderboard', { mode: e.mode, crew: !solo }) };
+        board: () => ui.open('leaderboard', { mode: e.mode, crew: !solo, from: 'RUN OVER' }) };
       return { acts, back: acts.menu, keys(ev) { if (ev.code !== 'Space' || props.online) return false; if (!ev.repeat) acts.again(); return true; } };
     },
   };
@@ -342,6 +342,65 @@ export function initScreens(g) {
         if (props.field && e.target === props.field) { if (e.code === 'Enter') { if (!e.repeat) acts.save(); return true; } return nameKey(e, props.field); }
         return false;
       } };
+    },
+  };
+
+  // 09 · leaderboard: WAVES / CONVOY, solo runs and crews apart, the world's top 100 or this browser's top 10.
+  // props: { mode, crew, local, from }. The focused crew row opens to show its pirates.
+  const CHIP = { wasp: 'WSP', corsair: 'COR', leviathan: 'LEV' };
+  screens.leaderboard = {
+    veil: 0.6, shot: () => ({ wide: true }),
+    hints: [[['←', '→'], 'MODE'], [['TAB'], 'FILTERS'], [['↑', '↓'], 'SCROLL · SELECTED ROW SHOWS THE CREW'], [['Y'], 'JUMP TO YOU'], [['ESC'], 'BACK']],
+    render(el, props) {
+      props.mode ??= store.lastMode;
+      props.world ??= {}; // board → rows | 'fail', read once per visit
+      const name = store.name, m = MODE[props.mode], board = boardOf(props.mode, props.crew ? 2 : 1);
+      const yours = (r) => (r.crew.length === 1 ? r.crew[0].name === name : mine(r, name));
+      for (const b of [props.mode, props.mode + '-crew']) if (!props.local && !(b in props.world)) { // both: the footer ranks you on each
+        props.world[b] = null;
+        g.world(b).then((rows) => rows, () => 'fail').then((rows) => {
+          props.world[b] = rows;
+          if (ui.top() !== 'leaderboard') return;
+          ui.refresh();
+          if (!props.touched) ui.focus(); // nothing pressed yet: land on your row, or the first
+        });
+      }
+      const rows = props.local ? store.best[board] : props.world[board];
+      const you = Array.isArray(rows) ? rows.findIndex(yours) : -1;
+      const best = (b) => { const l = props.local ? store.best[b] : props.world[b], i = Array.isArray(l) ? l.findIndex(yours) : -1; return i < 0 ? '–' : `<span class="bs-gold">#${i + 1}</span>`; };
+      const seg = (f, on, label) => `<button data-f="${f}" aria-pressed="${on}">${label}</button>`;
+      const line = (r, i) => `<div class="bs-lb-item${i === you ? ' is-you' : ''}" tabindex="0" data-f="r${i}"${i === Math.max(you, 0) ? ' data-first' : ''}><div class="bs-lb-row"><span>${i + 1}</span>
+        <span class="bs-row" style="gap:8px;min-width:0">${esc(r.crew[0].name)}${r.crew.length > 1 ? `<span class="bs-badge bs-badge--off">+${r.crew.length - 1}</span>` : ''}${i === you ? `<span class="bs-badge bs-badge--you">${r.crew.length > 1 ? 'YOUR CREW' : 'YOU'}</span>` : ''}</span>
+        <span class="bs-row" style="gap:4px">${r.crew.map((c) => `<span class="bs-ship-chip bs-ship-chip--${CHIP[c.ship] ? c.ship : 'wasp'}">${CHIP[c.ship] || '?'}</span>`).join('')}</span><span>${+r.wave}</span><span>${num(r.gold)}</span><span>×${+r.combo}</span></div>
+        ${r.crew.length > 1 ? `<div class="bs-lb-crew">${r.crew.map((c) => `<span class="bs-row"><span${c.name === name ? ' class="bs-gold"' : ''}>${esc(c.name)}</span><span class="bs-dim">${esc(String(c.ship).toUpperCase())}</span></span>`).join('')}</div>` : ''}</div>`;
+      el.innerHTML = `${head(90, 20, [props.from || 'MENU', 'LEADERBOARD'], 1, 'HALL OF INFAMY')}
+        <div class="bs-abs bs-row" style="left:90px;top:84px;width:780px;justify-content:space-between;align-items:flex-end">
+          <div class="bs-tabs" role="tablist" data-group>${['waves', 'convoy'].map((id) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.mode}">${MODE[id].name}</button>`).join('')}</div>
+          <div class="bs-row" style="gap:12px;padding-bottom:4px"><div class="bs-seg" data-group aria-label="Crew size">${seg('solo', !props.crew, 'SOLO')}${seg('crew', !!props.crew, 'CREW')}</div>
+            <div class="bs-seg" data-group aria-label="Scope">${seg('world', !props.local, 'WORLD')}${seg('local', !!props.local, 'THIS BROWSER')}</div></div></div>
+        <div class="bs-abs bs-panel bs-col" style="left:90px;top:119px;width:780px;height:368px;padding:12px 16px;gap:2px">
+          <div class="bs-lb-row bs-dim" style="font-size:8px;line-height:12px;border-bottom:2px solid var(--bs-wood-edge)"><span>#</span><span>${props.crew ? 'CREW' : 'CAPTAIN'}</span><span>${props.crew ? 'SHIPS' : 'SHIP'}</span><span>${m.unit}</span><span>GOLD</span><span>COMBO</span></div>
+          <div id="lb-rows" class="bs-col" data-group style="flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;gap:2px">${
+            rows === 'fail' ? '<p class="bs-alert" role="alert" style="padding:12px 8px"><b>✕</b> WORLD BOARD UNREACHABLE. THIS BROWSER STILL HAS YOUR RUNS.</p>'
+            : !rows ? '<p class="bs-dim" style="padding:12px 8px">◌ READING THE WORLD BOARD…</p>'
+            : rows.length ? rows.map(line).join('') : `<p class="bs-dim" style="padding:12px 8px">NO ${props.crew ? 'CREW' : 'SOLO'} RUN SIGNED YET.</p>`}</div>
+          <div class="bs-row bs-dim" style="justify-content:space-between;padding:6px 8px 0;border-top:2px solid var(--bs-wood-edge)"><span>${props.local ? 'THIS BROWSER · TOP 10' : 'WORLD TOP 100'} · CREW SCORES RANKED APART FROM SOLO</span>
+            <span>YOUR BEST · SOLO ${best(props.mode)} · CREW ${best(props.mode + '-crew')}</span></div></div>`;
+      const box = el.querySelector('#lb-rows');
+      for (const r of box.querySelectorAll('.bs-lb-item')) r.onfocus = () => { // keep the focused row in view (not scrollIntoView: it would scroll the stage too)
+        if (r.offsetTop < box.scrollTop) box.scrollTop = r.offsetTop;
+        else if (r.offsetTop + r.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = r.offsetTop + r.offsetHeight - box.clientHeight;
+      };
+      const set = (o, focus) => { Object.assign(props, o, { touched: true }); ui.refresh(); ui.focus(focus); };
+      return { acts: { 't-waves': () => set({ mode: 'waves' }, 't-waves'), 't-convoy': () => set({ mode: 'convoy' }, 't-convoy'),
+        solo: () => set({ crew: false }, 'solo'), crew: () => set({ crew: true }, 'crew'), world: () => set({ local: false }, 'world'), local: () => set({ local: true }, 'local') },
+        keys(e) {
+          props.touched = true;
+          const side = { ArrowLeft: 'waves', ArrowRight: 'convoy' }[e.code];
+          if (side && !document.activeElement?.closest('.bs-seg')) { if (side !== props.mode) set({ mode: side }, document.activeElement?.dataset.f?.startsWith('t-') ? 't-' + side : undefined); return true; }
+          if (e.code === 'KeyY' || /^y$/i.test(e.key)) { if (you >= 0) ui.focus('r' + you); return true; }
+          return false;
+        } };
     },
   };
 }

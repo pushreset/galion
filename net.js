@@ -30,7 +30,8 @@ const call = (path, init) => fetch(ICE_URL + path, { ...init, signal: AbortSigna
 // { retry } for a lookup, null for a host heartbeat (extra = '&code=ABCD&free=2'); a guest that could not get in passes '&skip=ABCD'.
 export const match = (q, extra = '') => call(`match?q=${q}${extra}`);
 
-// World leaderboard (same service, /scores): b = 'waves' | 'convoy'. No run → the board, a run { ini, wave, gold, combo, ship } → signs it.
+// World leaderboard (same service, /scores): b = 'waves' | 'convoy' (solo runs) | 'waves-crew' | 'convoy-crew'.
+// No run → the board, a run { crew: [{ name, ship }], wave, gold, combo } → signs it.
 // Resolves { top, rank } (rank: the run's row, -1 off the board). A string body is a simple CORS request: no preflight.
 export const worldScores = (b, run) => call(`scores?b=${b}`, run && { method: 'POST', body: JSON.stringify(run) });
 

@@ -1521,6 +1521,9 @@ initScreens({
   setMode: (m) => setConvoy(m === 'convoy'), // its map shows behind the ship screen
   startSolo,
   resume, reboot,
+  // a world board's rows. A service from before names has one board per game, crews and solo runs mixed, in the old shape
+  world: (b) => worldScores(b).catch((e) => (b.endsWith('-crew') ? worldScores(b.replace('-crew', '')) : Promise.reject(e)))
+    .then((r) => r.top.map(normRow).filter((row) => row && (row.crew.length > 1) === b.endsWith('-crew'))),
   pauseKeys: () => [ui.keyLabel(keys.pause), 'ESC'],
   isPause: (code) => actionOf[code] === 'pause',
   oldPanel: () => ui.reset(),
