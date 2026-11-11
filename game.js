@@ -8,7 +8,7 @@ import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
 import { hostRoom, joinRoom, match, worldScores, MAX_PLAYERS } from './net.js';
 import * as ui from './ui.js';
 import { initScreens } from './screens.js';
-import { store, SHIPS } from './store.js';
+import { store, SHIPS, boardOf, better, normRow, signLocal, markWorld } from './store.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
   const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
@@ -206,15 +206,7 @@ addEventListener('keydown', (e) => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.repeat) return;
   if (e.code === 'Escape' && state.mode === 'select' && net === 'solo' && !quick) return ui.reset('menu'); // the old panel, until its screens exist
-  if (e.code === 'KeyP') return net === 'solo' && togglePause(); // not Esc: Firefox spends it on leaving fullscreen. Online: the world never stops
-  if (paused) return; // before unlock(): it resumes the audio context
-  if (state.entry !== undefined) { // SUNK screen: typing initials, nothing else reacts (no mute, no reload)
-    e.preventDefault();
-    if (/^[a-z]$/i.test(e.key) && state.entry.length < 3) state.entry += e.key.toUpperCase(); // e.key: AZERTY-proof
-    else if (e.code === 'Backspace') state.entry = state.entry.slice(0, -1);
-    else if (e.code === 'Enter' && state.entry) return submitEntry();
-    return showEntry();
-  }
+  if (e.code === 'KeyP' || e.code === 'Escape') return openPause(); // Escape too, though fullscreen spends it on leaving fullscreen
   unlock();
   if (state.boarding) { if (e.code === 'Space') boardPress(); return; } // paused: Space is the only input
   if (e.code === 'KeyC') overview = !overview; // same physical key on AZERTY
@@ -226,7 +218,6 @@ addEventListener('keydown', (e) => {
     if (pick < 3 && (net === 'solo' ? !quick : net === 'guest' ? myPid : roomOpen)) choosePlayer(pick); // solo: not while quick match searches; guest: only once the host said hi; host: once the room is open
     return;
   }
-  if ((state.mode === 'dead' && state.t > 3) && (e.code === 'Space' || e.code === 'Enter')) return location.reload();
   if (e.code === 'Enter' && net === 'host') return sail();
   const msg = e.code === 'Space' && state.mode !== 'pick' ? { t: 'board' }
     : e.code === 'ArrowUp' ? { t: 'sail', d: 1 } : e.code === 'ArrowDown' ? { t: 'sail', d: -1 }
@@ -269,15 +260,27 @@ function castSkill(p, slot) {
   if (r.id === 'boost') sfx.splash(1, 0);
   if (r.id === 'chain' || r.id === 'fire' || r.id === 'brace' || r.id === 'repair') sfx.hit(0.5, 0);
 }
+// Pause overlay (screens.js). Solo: the world and the audio clock stop. Online the sea does not stop: the overlay
+// only takes the keys, and the ship drifts.
 let paused = false;
-function togglePause() {
-  paused = !paused;
-  held.clear(); // a key released while paused never sends keyup to the game
-  $('pause').hidden = !paused;
-  setPaused(paused);
+function openPause() {
+  if (state.mode === 'select' || (net === 'guest' && guestShip === null)) return; // no run yet
+  held.clear(); // a key released under the overlay never sends keyup to the game
+  if (net === 'solo') { paused = true; setPaused(true); }
+  ui.open('pause', { online: net !== 'solo' });
+}
+function resume() {
+  paused = false;
+  setPaused(false);
+  ui.reset();
+}
+// A run starts from a fresh page: the menus ask for a reload and say where to land (read at the bottom of this file).
+function reboot(to) {
+  try { sessionStorage.setItem('broadside.boot', to); } catch {}
+  location.reload();
 }
 addEventListener('blur', () => { // alt-tab: pause solo, release the keys online (their keyup goes to the other window)
-  if (net === 'solo') return !paused && togglePause();
+  if (net === 'solo') return void (ui.active() || openPause());
   held.clear();
   if (net === 'guest' && guestShip !== null) sendInput(); // now: a hidden tab runs no frames
 });
@@ -888,53 +891,28 @@ function pay(x, z, gold) {
   popup(x, z, `+${gold}`);
   return gold;
 }
-// leaderboard: top 10 in this browser, ranked by wave then gold
-const lbKey = () => (convoy ? 'broadside.convoy' : 'broadside.scores'); // one board per game
-const better = (a, b) => b.wave - a.wave || b.gold - a.gold;
-function loadScores() { try { return JSON.parse(localStorage.getItem(lbKey())) || []; } catch { return []; } }
-function saveScores(list) { try { localStorage.setItem(lbKey(), JSON.stringify(list)); } catch {} } // private window: the run just isn't kept
-let run = null;
+// End of a run (screens.js `gameover`): signed with the pirates' names, no typing. It goes on this browser's board,
+// then on the world's (ice service, net.js); the screen shows the rows around it, on the world board once it answers.
+let over = false;
 function gameOver() {
-  if (state.t > 3 && $('over').hidden) { $('over').hidden = false; endRun(); }
+  if (state.t > 3 && !over) { over = true; endRun(); }
 }
 function endRun() {
-  const ship = players.length > 1 ? players.map((p) => p.name).join('+') : me.name; // online: the whole crew signs
-  run = { ini: '', wave: state.wave, gold: state.gold, ship, combo: combo.best, date: Date.now() };
-  const list = loadScores();
-  if (list.length < 10 || better(run, list[list.length - 1]) < 0) { state.entry = ''; showEntry(); }
-  else { showBoard(list, -1); worldBoard(false); }
-}
-// The world's top 100 (ice service, net.js) takes over from this browser's board once it answers; offline or service down, the local one stays.
-// signed: the run goes up with its initials. Not signed (off this browser's top 10): the run may still make the world's, then it is signed after all.
-// A signing the service refuses (its limit per address, its bounds) or never gets says so under the local board: the run is not up there.
-function worldBoard(signed) {
-  const scored = run.wave > 0; // sunk before wave 1 (a crew ramming each other): the service takes no such run, the board is only read
-  worldScores(convoy ? 'convoy' : 'waves', signed && scored && run).then(({ top, rank }) => {
-    if (!signed && scored && (top.length < 100 || better(run, top[top.length - 1]) < 0)) { state.entry = ''; showEntry(); }
-    else showBoard(top, rank, 'WORLD TOP 100');
-  }).catch(() => { if (signed && scored) $('over-stats').insertAdjacentHTML('beforeend', 'NOT SIGNED ON THE WORLD BOARD'); });
-}
-function showEntry() {
-  const ini = (state.entry + '___').slice(0, 3).split('').join(' ');
-  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<br>NEW HIGH SCORE! <b class="ini">${ini}</b><br><kbd>Enter</kbd> to sign`;
-  $('over-help').hidden = true;
-}
-function submitEntry() {
-  run.ini = state.entry;
-  state.entry = undefined;
-  const list = [...loadScores(), run].sort(better).slice(0, 10);
-  saveScores(list);
-  if (list[0] === run) sfx.fanfare();
-  showBoard(list, list.indexOf(run));
-  worldBoard(true);
-}
-function showBoard(list, mine, title = 'THIS BROWSER') {
-  // esc: the world's rows come from the network
-  const rows = list.map((s, i) => `<tr${i === mine ? ' class="me"' : ''}><td>${i + 1}</td><td>${esc(s.ini)}</td><td>${+s.wave}</td><td>${+s.gold}</td><td>×${+s.combo}</td><td>${esc(s.ship)}</td></tr>`).join('');
-  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<br>${title}<div id="lb-box"><table id="lb"><tr><th>#</th><th>NAME</th><th>${convoy ? 'CONVOY' : 'WAVE'}</th><th>GOLD</th><th>COMBO</th><th>SHIP</th></tr>${rows}</table></div>`;
-  $('over-help').hidden = false;
-  const row = document.querySelector('#lb .me'), box = $('lb-box'); // a hundred rows scroll: bring the player's own into view
-  if (row) box.scrollTop = row.offsetTop - box.clientHeight / 2; // not scrollIntoView: it scrolls the page too, and would shift the HUD on a short screen
+  const m = convoy ? 'convoy' : 'waves';
+  const crew = [...players].sort((a, b) => a.pid - b.pid).map((p) => ({ name: p.tag, ship: String(p.name).toLowerCase() })); // online: the whole crew signs, in seat order
+  const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: state.wave, gold: state.gold, combo: combo.best, at: Date.now() };
+  const local = signLocal(board, entry);
+  const res = { entry, board, name: me?.tag || store.name, online: net !== 'solo', best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
+  held.clear();
+  ui.open('gameover', res);
+  if (local.rank === 0) sfx.fanfare();
+  // sunk before wave 1 (a crew ramming each other): the service takes no such run, its board is only read
+  worldScores(board, entry.wave > 0 && entry).then((r) => {
+    const top = r.top.map(normRow).filter(Boolean); // a service from before names answers its old rows
+    if (entry.wave > 0 && r.rank >= 0) { Object.assign(res, { world: r.rank, top, rank: r.rank }); markWorld(board, entry.at, r.rank + 1); }
+    else res.world = -1; // off the world's top 100: this browser's rows stay
+    if (ui.top() === 'gameover') ui.refresh();
+  }).catch(() => ui.toast('warn', 'WORLD BOARD UNREACHABLE · SAVED ON THIS BROWSER', 5000)); // down, or it refused the run (its limit per address, its bounds)
 }
 function updateLoot(dt) {
   for (let i = loot.length - 1; i >= 0; i--) {
@@ -1395,7 +1373,6 @@ const lobbyLock = (on) => { for (const el of $('lobby').querySelectorAll('button
 function online() {
   if (net !== 'solo' || state.mode !== 'select') return false;
   if (typeof Peer === 'undefined') { lobbyMsg('ONLINE UNAVAILABLE (PeerJS did not load)'); return false; }
-  if (paused) togglePause(); // paused on ship select (alt-tab for the code): online there is no P to clear it
   document.activeElement?.blur(); // a focused input, once disabled, keeps eating the keys (Firefox)
   lobbyLock(true);
   return true;
@@ -1518,20 +1495,25 @@ initScreens({
   unlock,
   muteLabel: () => 'M',
   setMode: (m) => setConvoy(m === 'convoy'), // its map shows behind the ship screen
-  startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); },
+  startSolo,
+  resume, reboot,
+  pauseKeys: () => ['P', 'ESC'],
+  isPause: (code) => code === 'KeyP',
   oldPanel: () => ui.reset(),
 });
+function startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); }
 ui.setOnChange(() => document.body.classList.toggle('menus', ui.active()));
 // broadside.boot: a reload asked for by the menus (a run starts from a fresh page) says where to land
 let boot = null;
 try { boot = sessionStorage.getItem('broadside.boot'); sessionStorage.removeItem('broadside.boot'); } catch {}
 if (!store.name || !boot) ui.open('title');
+else if (boot === 'sail') startSolo(store.lastMode, SHIPS.indexOf(store.lastShip)); // SAIL AGAIN: same mode, same ship
 else if (boot === 'ship') ui.reset('menu', 'solo-mode', 'ship');
 else ui.reset('menu');
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
 window.__game = {
-  ui, get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
+  ui, get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: () => store.best, zoom: () => (overview = !overview), camera,
   killWave: () => (state.queue = []) && ships.filter((o) => o.team === 1).forEach((o) => damage(o, 1e9)),
   startWave,
   advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); post.render(scene, camera); },

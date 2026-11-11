@@ -64,6 +64,12 @@ export function signLocal(board, entry) {
   return { top, rank: top.indexOf(entry) };
 }
 
+// the world's rank of a run kept here (the menu shows it next to this browser's best)
+export function markWorld(board, at, rank) {
+  const best = loadBest(), row = best[board].find((r) => r.at === at);
+  if (row) { row.world = rank; set('best', best); }
+}
+
 export const store = {
   get name() { return cleanName(get('name') ?? raw('gallion-nick')); }, // '': the name screen. gallion-nick: the old lobby field
   set name(v) { set('name', cleanName(v)); },

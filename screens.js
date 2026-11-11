@@ -4,6 +4,8 @@ import * as ui from './ui.js';
 import { screens, esc, keyLabel } from './ui.js';
 import { store, cleanName, rollName, SHIPS } from './store.js';
 
+const mine = (row, name) => row.crew.some((c) => c.name === name);
+
 const SKULL = 'M3 0h6v1h-6z M2 1h8v1h-8z M1 2h10v1h-10z M1 3h1v2h-1z M4 3h4v2h-4z M10 3h1v2h-1z M1 5h10v1h-10z M2 6h3v1h-3z M7 6h3v1h-3z M3 7h6v1h-6z';
 const skull = (w, shadow) => `<svg width="${w}" height="${w * 0.75}" viewBox="0 0 12 9" shape-rendering="crispEdges" aria-hidden="true">` +
   `${shadow ? `<path fill="#1b110b" transform="translate(0.5 0.5)" d="${SKULL}"/>` : ''}<path fill="#f5ecd2" d="${SKULL} M3 8h1v1h-1z M5 8h2v1h-2z M8 8h1v1h-1z"/></svg>`;
@@ -185,6 +187,53 @@ export function initScreens(g) {
           else return false;
           return true;
         } };
+    },
+  };
+
+  // 10 · end of a run, over the game. props: endRun's result (game.js); `top` / `rank` become the world's once it answers
+  screens.gameover = {
+    veil: 0.72,
+    hints: (p) => (p.online ? [[['←', '→'], 'CHOOSE'], [['ESC'], 'MAIN MENU']] : [[['SPACE'], 'SAIL AGAIN'], [['←', '→'], 'CHOOSE'], [['ESC'], 'MAIN MENU']]),
+    render(el, props) {
+      const { entry: e, top, rank, name } = props, m = MODE[e.mode], solo = e.crew.length === 1;
+      // an older row of ours further down: how many places this run gained on it
+      const old = rank < 0 ? -1 : top.findIndex((r, i) => i > rank && (solo ? r.crew[0].name === name : mine(r, name)));
+      const gain = old - rank - 1;
+      const from = Math.max(0, Math.min(rank - 2, top.length - 4));
+      const row = (r, i) => `<div class="bs-over-row${i === rank ? ' is-you' : ''}"><span>${i + 1}</span><span>${esc(r.crew[0].name)}${r.crew.length > 1 ? ` +${r.crew.length - 1}` : ''}${i === rank && gain > 0 ? ` <span class="bs-over-up">▲ ${gain}</span>` : ''}</span><span>${+r.wave}</span><span>${num(r.gold)}</span><span>×${+r.combo}</span></div>`;
+      const ranks = [props.world === null ? '' : props.world < 0 ? 'OFF THE WORLD TOP 100' : `#${props.world + 1} WORLD`, props.local < 0 ? '' : `#${props.local + 1} THIS BROWSER`].filter(Boolean).join(' · ');
+      const btn = (f, label, first) => `<button class="bs-btn" data-f="${f}"${first ? ' data-first' : ''}${f === 'board' && !screens.leaderboard ? ' disabled' : ''}>${label}</button>`;
+      el.innerHTML = `<div class="bs-abs bs-panel bs-col" role="dialog" aria-label="Run over" style="left:220px;top:24px;width:520px;padding:16px 28px;gap:12px;align-items:center">
+        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(--bs-red);text-shadow:3px 3px 0 var(--bs-wood-edge)">SUNK</h1>
+          <span class="bs-dim" style="letter-spacing:1px">${m.name} · ${solo ? `SOLO · ${e.crew[0].ship.toUpperCase()}` : `CREW OF ${e.crew.length}`}</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-self:stretch">${[[m.unit, e.wave, ''], ['GOLD', num(e.gold), 'var(--bs-gold)'], ['BEST COMBO', '×' + e.combo, 'var(--bs-orange)']].map(([l, v, c]) =>
+          `<div class="bs-col" style="padding:8px;background:var(--bs-wood-edge);align-items:center;gap:4px"><span class="bs-dim">${l}</span><span style="font-size:24px;line-height:24px;color:${c}">${v}</span></div>`).join('')}</div>
+        ${props.best ? '<div class="bs-badge" style="padding:4px 12px;font-size:16px;line-height:16px;letter-spacing:1px">NEW PERSONAL BEST</div>' : ''}
+        <div class="bs-col" style="gap:2px;align-self:stretch"><div class="bs-row bs-dim" style="justify-content:space-between;padding:0 8px 4px"><span>SIGNED AS <span class="bs-gold">${esc(name)}</span></span><span>${ranks}</span></div>
+          ${top.slice(from, from + 4).map((r, i) => row(r, from + i)).join('')}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-self:stretch">${props.online ? btn('crew', '▶ FIND A NEW CREW', 1) : btn('again', '▶ SAIL AGAIN', 1) + btn('ship', 'CHANGE SHIP')}${btn('board', 'LEADERBOARD')}${btn('menu', 'MAIN MENU')}</div></div>`;
+      const acts = { again: () => g.reboot('sail'), ship: () => g.reboot('ship'), crew: () => g.reboot('online'), menu: () => g.reboot('menu'),
+        board: () => ui.open('leaderboard', { mode: e.mode, crew: !solo }) };
+      return { acts, back: acts.menu, keys(ev) { if (ev.code !== 'Space' || props.online) return false; if (!ev.repeat) acts.again(); return true; } };
+    },
+  };
+
+  // 11 · pause, over the game. Online nothing stops: the banner says so
+  screens.pause = {
+    veil: 0.55,
+    hints: () => [[g.pauseKeys(), 'RESUME'], [['↑', '↓'], 'CHOOSE'], [['ENTER'], 'CONFIRM']],
+    render(el, props) {
+      el.innerHTML = `${props.online ? '<div class="bs-abs bs-toast bs-toast--warn" role="status" style="left:260px;top:16px;width:440px;justify-content:center"><b>!</b> ONLINE : THE SEA DOES NOT STOP. YOUR SHIP DRIFTS.</div>' : ''}
+        <div class="bs-abs bs-panel bs-menu" role="dialog" aria-label="Paused" style="left:320px;top:${props.confirm ? 96 : 132}px;width:320px;padding:20px">
+          <h1 style="margin-bottom:4px;text-align:center;font-size:40px;line-height:40px;font-weight:700;letter-spacing:3px;text-shadow:3px 3px 0 var(--bs-wood-edge)">PAUSED</h1>
+          <button class="bs-btn" data-f="resume" data-first>RESUME</button><button class="bs-btn" data-f="settings"${screens.settings ? '' : ' disabled'}>SETTINGS</button><button class="bs-btn" data-f="quit">QUIT TO MENU</button>
+          ${props.confirm ? `<div class="bs-col" role="alertdialog" aria-label="Confirm quit" style="gap:8px;padding:12px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-red)">
+            <p>ABANDON SHIP ? THIS RUN ENDS AND THE SCORE IS NOT SIGNED.${props.online ? ' YOUR CREW SAILS ON WITHOUT YOU.' : ''}</p>
+            <div class="bs-row" style="gap:8px"><button class="bs-btn bs-btn--s bs-btn--danger" data-f="yes" style="padding:6px 10px">YES, QUIT</button><button class="bs-btn bs-btn--s" data-f="stay" style="padding:6px 10px">STAY ABOARD</button></div></div>` : ''}</div>`;
+      const ask = (on) => { props.confirm = on; ui.refresh(); ui.focus(on ? 'stay' : 'quit'); };
+      const back = () => (props.confirm ? ask(false) : g.resume());
+      return { back, acts: { resume: g.resume, settings: () => ui.open('settings', { from: 'pause' }), quit: () => ask(true), yes: () => g.reboot('menu'), stay: () => ask(false) },
+        keys(e) { if (!g.isPause(e.code)) return false; if (!e.repeat) g.resume(); return true; } };
     },
   };
 }

@@ -231,3 +231,9 @@
 .bs-card[aria-pressed="true"] { background: var(--bs-wood-hi); box-shadow: inset 0 0 0 2px var(--bs-gold), var(--bs-shadow); }
 .bs-card-name { font-size: 24px; line-height: 24px; font-weight: 700; }
 .bs-card[aria-pressed="true"] .bs-card-name { color: var(--bs-gold); }
+
+/* game over: the rows around the run */
+.bs-over-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) 48px 60px 36px; gap: 8px; align-items: center; padding: 2px 8px; }
+.bs-over-row > :nth-child(n+3) { text-align: right; }
+.bs-over-row.is-you { padding: 6px 8px; font-size: 16px; line-height: 16px; color: var(--bs-gold); background: var(--bs-wood-hi); box-shadow: inset 0 0 0 2px var(--bs-gold); }
+.bs-over-up { font-size: 8px; color: var(--bs-green); }
