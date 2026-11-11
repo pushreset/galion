@@ -1,9 +1,12 @@
-# Coolify "Docker Compose" resource: TURN relay (coturn) + credential and quick-match service (ice) for galion
+# Coolify "Docker Compose" resource: TURN relay (coturn) + credential, quick-match and leaderboard service (ice) for galion
 # Env vars to set in Coolify:
 #   PUBLIC_IP   = public IP of the server
 #   TURN_HOST   = domain or public IP clients use to reach coturn
 #   TURN_SECRET = long random string (openssl rand -hex 32)
 # Firewall: open 3478 UDP+TCP and 49160-49200 UDP directly on the server (not through Traefik).
+# The world leaderboard lives in the `scores` volume (/data/scores.json): it survives redeploys.
+volumes: # up here, not below: qa/quick.mjs runs everything after `content: |` as the service's script
+  scores:
 services:
   coturn:
     image: coturn/coturn:4.6
@@ -31,16 +34,45 @@ services:
       - TURN_HOST=${TURN_HOST}
       - ORIGIN=https://pushreset.github.io
     volumes:
+      - scores:/data
       - type: bind
         source: ./ice.mjs
         target: /app/ice.mjs
         content: |
-          // 1-hour coturn credentials (TURN REST API) and quick-match queues, for the game's origin only
+          // 1-hour coturn credentials (TURN REST API), quick-match queues and the world leaderboard, for the game's origin only
           import { createServer } from 'node:http';
           import { createHmac } from 'node:crypto';
-          const { TURN_SECRET, TURN_HOST, ORIGIN } = process.env;
-          const hits = new Map(); // ponytail: in-memory per-IP limit, reset every 10 min
-          setInterval(() => hits.clear(), 600_000);
+          import { readFileSync, writeFileSync, renameSync } from 'node:fs';
+          const { TURN_SECRET, TURN_HOST, ORIGIN, SCORES = '/data/scores.json' } = process.env;
+          const hits = new Map(), posts = new Map(); // ponytail: in-memory per-IP limits, reset every 10 min
+          setInterval(() => { hits.clear(); posts.clear(); }, 600_000);
+          // World leaderboard: top 100 per game, ranked like the game's own board (wave, then gold).
+          // ponytail: a score is whatever the client says (the host's browser runs the game, the server never sees it), so bounds and a
+          // per-IP limit are the only guards: a server-checked replay if cheating shows up. One JSON file rewritten on each score: one instance, 200 rows
+          const boards = { waves: [], convoy: [] };
+          try { const saved = JSON.parse(readFileSync(SCORES, 'utf8')); for (const b in boards) if (Array.isArray(saved[b])) boards[b] = saved[b]; } catch {} // first start, or a broken file: empty boards
+          const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+          // a run { ini, wave, gold, combo, ship } → { top, rank } (rank: its row, -1 off the board), null for a bad one
+          function sign(b, s) {
+            if (!(typeof s?.ini === 'string' && /^[A-Z]{1,3}$/.test(s.ini) && typeof s.ship === 'string' && /^[A-Za-z]{1,12}(\+[A-Za-z]{1,12}){0,3}$/.test(s.ship)
+              && int(s.wave, 1, 999) && int(s.gold, 0, 1e6) && int(s.combo, 0, 999))) return null;
+            const now = Date.now(), list = boards[b];
+            // co-op: each browser of the crew signs the same run, they share one row (two identical solo runs within 10 min would too)
+            let row = list.find((r) => r.wave === s.wave && r.gold === s.gold && r.ship === s.ship && now - r.date < 600_000);
+            if (row) {
+              const inis = row.ini.split('+');
+              if (!inis.includes(s.ini) && inis.length < 4) row.ini += '+' + s.ini;
+              row.combo = Math.max(row.combo, s.combo);
+            } else {
+              row = { ini: s.ini, wave: s.wave, gold: s.gold, combo: s.combo, ship: s.ship, date: now };
+              list.push(row);
+              list.sort((x, y) => y.wave - x.wave || y.gold - x.gold); // stable: on a tie the earlier run stays ahead
+              list.length = Math.min(list.length, 100);
+            }
+            try { writeFileSync(SCORES + '.tmp', JSON.stringify(boards)); renameSync(SCORES + '.tmp', SCORES); } // rename: a crash mid-write leaves the old file
+            catch (e) { console.error('scores not saved', e.message); } // no volume, disk full: the board goes on in memory
+            return { top: list, rank: list.indexOf(row) };
+          }
           // Quick match: one open room per queue; the server only hands out room codes, games stay P2P.
           // ponytail: rooms fill one at a time, in memory (a restart empties the queues, running games go on); region / skill buckets if traffic grows
           const SEATS = 3; // guests per room: MAX_PLAYERS - 1 in net.js
@@ -74,6 +106,18 @@ services:
             if (!(url.pathname === '/match' && url.searchParams.get('code'))) { // heartbeats (every 10 s) don't count; an empty code is a lookup
               hits.set(ip, (hits.get(ip) || 0) + 1);
               if (hits.get(ip) > 60) { res.writeHead(429, cors).end(); return; }
+            }
+            if (url.pathname === '/scores') { // GET ?b=waves|convoy → the board; POST, the run as JSON → signs it
+              const b = url.searchParams.get('b');
+              if (!Object.hasOwn(boards, b)) { res.writeHead(400, cors).end(); return; }
+              const send = (o) => { res.writeHead(o ? 200 : 400, { ...cors, 'Content-Type': 'application/json' }); res.end(o ? JSON.stringify(o) : ''); };
+              if (req.method !== 'POST') { send({ top: boards[b], rank: -1 }); return; }
+              posts.set(ip, (posts.get(ip) || 0) + 1);
+              if (posts.get(ip) > 12) { res.writeHead(429, cors).end(); return; } // a run takes minutes: 12 covers four players behind one address
+              let body = '';
+              req.on('data', (d) => { body += d; if (body.length > 1024) req.destroy(); }); // a run is under 100 bytes
+              req.on('end', () => { let s = null; try { s = JSON.parse(body); } catch {} send(sign(b, s)); });
+              return;
             }
             if (url.pathname === '/match') {
               if (!Object.hasOwn(rooms, q)) { res.writeHead(400, cors).end(); return; }

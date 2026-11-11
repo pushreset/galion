@@ -2,7 +2,9 @@
 // Same needs as qa/e2e.mjs: `python3 -m http.server 8765` in this repo, network access (PeerJS signalling), playwright-core.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT || '../../ttrpg-online-platform/node_modules/playwright-core');
@@ -11,7 +13,8 @@ const URL = process.env.URL || 'http://127.0.0.1:8765/', PORT = 3123;
 // the service's script, as Coolify mounts it, on PORT and with the test page's origin
 const src = readFileSync(new globalThis.URL('../coturn-compose.txt', import.meta.url), 'utf8')
   .split('content: |\n')[1].replace(/^ {10}/gm, '').replace('listen(3000)', `listen(${PORT})`);
-const ice = spawn(process.execPath, ['--input-type=module', '-'], { env: { ...process.env, ORIGIN: new globalThis.URL(URL).origin, TURN_SECRET: 'x', TURN_HOST: 'x' }, stdio: ['pipe', 'inherit', 'inherit'] });
+const DATA = mkdtempSync(join(tmpdir(), 'galion-')), SCORES = join(DATA, 'scores.json'); // the leaderboard's file, /data/scores.json in the stack
+const ice = spawn(process.execPath, ['--input-type=module', '-'], { env: { ...process.env, ORIGIN: new globalThis.URL(URL).origin, TURN_SECRET: 'x', TURN_HOST: 'x', SCORES }, stdio: ['pipe', 'inherit', 'inherit'] });
 ice.stdin.end(src);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 await sleep(500);
@@ -48,6 +51,28 @@ try {
     await sleep(10200); // B never opens (its host left): A, still waiting, takes the slot back with its heartbeat
     await m(`&code=${A}&free=3`);
     assert.deepEqual(await m(), { join: A }, 'a waiting host is relisted over a dead room');
+    // the world leaderboard: bounds, one row per crew, a top 100, kept on disk
+    const post = async (run, ip = '10.1.0.1', b = 'waves', origin = new globalThis.URL(URL).origin) => {
+      const r = await fetch(`http://127.0.0.1:${PORT}/scores?b=${b}`, { method: 'POST', body: typeof run === 'string' ? run : JSON.stringify(run), headers: { Origin: origin, 'X-Forwarded-For': ip } });
+      return r.status === 200 ? r.json() : r.status;
+    };
+    const run = { ini: 'AAA', wave: 5, gold: 120, combo: 3, ship: 'Wasp+Corsair' };
+    assert.equal(await post(run, undefined, undefined, 'https://evil.example'), 403, 'another origin does not sign');
+    assert.equal(await post(run, undefined, 'pvp'), 400, 'no such board');
+    for (const bad of [{ ...run, ini: '<b>' }, { ...run, ini: ['AAA'] }, { ...run, wave: 0 }, { ...run, gold: 1.5 }, { ...run, ship: 'Wasp<i>' }, '{', 'null'])
+      assert.equal(await post(bad), 400, `refused: ${JSON.stringify(bad)}`);
+    assert.deepEqual(await get('scores?b=waves'), { top: [], rank: -1 }, 'bad runs leave the board empty');
+    assert.equal((await post(run)).rank, 0);
+    await post({ ...run, ini: 'BBB', combo: 4 });
+    const crew = await post({ ...run, ini: 'BBB' }); // signing twice adds nothing
+    assert.deepEqual([crew.top.length, crew.top[0].ini, crew.top[0].combo, crew.rank], [1, 'AAA+BBB', 4, 0], 'a crew shares one row');
+    for (let i = 0; i < 100; i++) await post({ ...run, ini: 'CCC', wave: 6, gold: i }, `10.2.0.${i}`);
+    const { top } = await get('scores?b=waves');
+    assert.deepEqual([top.length, top[0].gold, top[99].gold, top.some((r) => r.wave === 5)], [100, 99, 0, false], 'a top 100, best first: the weakest run fell off');
+    assert.equal((await post({ ...run, wave: 1 }, '10.3.0.1')).rank, -1, 'a run below the hundredth is not listed');
+    assert.equal((await get('scores?b=convoy')).top.length, 0, 'one board per game');
+    assert.equal(JSON.parse(readFileSync(SCORES, 'utf8')).waves.length, 100, 'the board is on disk');
+    assert.equal(await last(13, () => post(run, '10.4.0.1', 'convoy')), 429, 'signing is rate limited per address');
   }
   // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host gets a ship)
   {
@@ -96,4 +121,5 @@ try {
 } finally {
   await browser?.close();
   ice.kill();
+  rmSync(DATA, { recursive: true, force: true });
 }

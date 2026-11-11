@@ -49,6 +49,8 @@ When hole punching fails (strict or symmetric NATs, some corporate or mobile net
 
 **Quick match** adds one step before signalling: the same Coolify service that hands out TURN credentials keeps one open room per queue (`pvp`, `coop-waves`, `coop-convoy`). `GET /match?q=pvp` answers `{host: code}` (no open room: you open it, under that code), `{join: code}`, or `{retry}` while the room's host is still registering on PeerJS. The host reports its free seats every 10 s (`&code=…&free=n`; 0 as soon as the game starts, and once its tab has been hidden for over a minute, its pirate being away; before that a guest can still join, and a bell and the tab's title call the host back); a room silent for 25 s is dropped, and a guest who can't get in asks again with `&skip=code`. A host whose room was dropped while it still has free seats relists it with its next heartbeat (when the queue has no open room). The queues live in memory: a restart empties them, games already running don't notice and waiting hosts relist. To test locally, `qa/quick.mjs` runs a copy of the service and points the game at it with `?ice=http://127.0.0.1:3123/`.
 
+**World leaderboard**: the same service keeps a top 100 per game (`waves`, `convoy`) in a JSON file on a Docker volume (`scores`, `/data/scores.json`), so it survives restarts and redeploys. `GET /scores?b=waves` answers `{top, rank}`; `POST /scores?b=waves` with a run (`{ini, wave, gold, combo, ship}`) signs it and answers the board with the run's row. A co-op crew shares one row: each browser signs the same run and the initials add up (`AAA+BBB`). The end screen shows this browser's top 10 first, then the world's once the service answers; a run that misses the local board but makes the world's is signed too. Scores are whatever the browser says (the host runs the game, the server never sees it): the service only checks bounds and limits signings per address, so the board can be forged.
+
 All of it is free: STUN answers once per connection (a few bytes), and signalling is a handful of messages. Only TURN carries real traffic, and only when the direct link fails.
 
 ### What goes over the wire
@@ -82,7 +84,7 @@ Arrows steer. The letter keys are physical positions, so the broadsides are `A` 
 - Skill bar (4 slots, learn and level up between waves)
 - Merchant convoys, gold pickup with magnet, combo multiplier (×2 to ×5)
 - Boarding: automatic under 20% hull, otherwise a timing QTE; crew losses and recruits
-- Procedural music and SFX, local top-10 leaderboard
+- Procedural music and SFX, local top-10 leaderboard and a world top 100
 
 ## Code
 
@@ -96,7 +98,7 @@ Arrows steer. The letter keys are physical positions, so the broadsides are `A` 
 | `radar.js` | Compass / radar |
 | `sfx.js` | Sound effects and procedural music |
 | `check.mjs` | Assertions on the sim: `node check.mjs` |
-| `coturn-compose.txt` | Coolify stack: coturn relay + `ice` service (TURN credentials, quick-match queues) |
+| `coturn-compose.txt` | Coolify stack: coturn relay + `ice` service (TURN credentials, quick-match queues, world leaderboard) |
 | `qa/` | QA screenshots, two-browser runs (`qa/e2e.mjs`, `qa/quick.mjs`) |
 
 Ideas backlog (in French): [`ideas.md`](ideas.md).

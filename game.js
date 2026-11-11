@@ -5,7 +5,7 @@ import { buildShip, setGuns, buildTentacle } from './ships.js';
 import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
 import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
-import { hostRoom, joinRoom, match, MAX_PLAYERS } from './net.js';
+import { hostRoom, joinRoom, match, worldScores, MAX_PLAYERS } from './net.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
   const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
@@ -876,7 +876,16 @@ function endRun() {
   run = { ini: '', wave: state.wave, gold: state.gold, ship, combo: combo.best, date: Date.now() };
   const list = loadScores();
   if (list.length < 10 || better(run, list[list.length - 1]) < 0) { state.entry = ''; showEntry(); }
-  else showBoard(list, -1);
+  else { showBoard(list, -1); worldBoard(false); }
+}
+// The world's top 100 (ice service, net.js) takes over from this browser's board once it answers; offline or service down, the local one stays.
+// signed: the run goes up with its initials. Not signed (off this browser's top 10): the run may still make the world's, then it is signed after all.
+function worldBoard(signed) {
+  const { ini, wave, gold, combo: best, ship } = run;
+  worldScores(convoy ? 'convoy' : 'waves', signed && { ini, wave, gold: Math.round(gold), combo: best, ship }).then(({ top, rank }) => {
+    if (!signed && (top.length < 100 || better(run, top[top.length - 1]) < 0)) { state.entry = ''; showEntry(); }
+    else showBoard(top, rank, 'WORLD TOP 100');
+  }).catch(() => {});
 }
 function showEntry() {
   const ini = (state.entry + '___').slice(0, 3).split('').join(' ');
@@ -890,11 +899,14 @@ function submitEntry() {
   saveScores(list);
   if (list[0] === run) sfx.fanfare();
   showBoard(list, list.indexOf(run));
+  worldBoard(true);
 }
-function showBoard(list, mine) {
-  const rows = list.map((s, i) => `<tr${i === mine ? ' class="me"' : ''}><td>${i + 1}</td><td>${s.ini}</td><td>${s.wave}</td><td>${s.gold}</td><td>×${s.combo}</td><td>${s.ship}</td></tr>`).join('');
-  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<table id="lb"><tr><th>#</th><th>NAME</th><th>${convoy ? 'CONVOY' : 'WAVE'}</th><th>GOLD</th><th>COMBO</th><th>SHIP</th></tr>${rows}</table>`;
+function showBoard(list, mine, title = 'THIS BROWSER') {
+  // esc: the world's rows come from the network
+  const rows = list.map((s, i) => `<tr${i === mine ? ' class="me"' : ''}><td>${i + 1}</td><td>${esc(s.ini)}</td><td>${+s.wave}</td><td>${+s.gold}</td><td>×${+s.combo}</td><td>${esc(s.ship)}</td></tr>`).join('');
+  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<br>${title}<div id="lb-box"><table id="lb"><tr><th>#</th><th>NAME</th><th>${convoy ? 'CONVOY' : 'WAVE'}</th><th>GOLD</th><th>COMBO</th><th>SHIP</th></tr>${rows}</table></div>`;
   $('over-help').hidden = false;
+  document.querySelector('#lb .me')?.scrollIntoView({ block: 'center' }); // a hundred rows scroll: bring the player's own into view
 }
 function updateLoot(dt) {
   for (let i = loot.length - 1; i >= 0; i--) {

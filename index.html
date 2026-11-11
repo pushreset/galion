@@ -25,7 +25,8 @@
   #combo .bar i { background: #ff8a3a; }
   #combo[hidden], #over-help[hidden] { display: none; }
   #lb { margin: 8px auto; border-collapse: collapse; font-size: 12px; line-height: 1.7; }
-  #lb th { color: #ddcda6; font-weight: normal; padding: 0 8px; }
+  #lb-box { max-height: 44vh; overflow-y: auto; pointer-events: auto; } /* the world's top 100 scrolls; .hud lets the pointer through */
+  #lb th { color: #ddcda6; font-weight: normal; padding: 0 8px; position: sticky; top: 0; background: #3f2616; }
   #lb td { padding: 0 8px; }
   #lb .me td { color: #ffd24a; }
   .ini { color: #ffd24a; font-size: 24px; font-weight: normal; }

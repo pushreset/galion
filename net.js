@@ -27,6 +27,11 @@ const newCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'
 export const match = (q, extra = '') => fetch(`${ICE_URL}match?q=${q}${extra}`, { signal: AbortSignal.timeout(4000) })
   .then((r) => { if (!r.ok) throw new Error(r.status); return r.status === 204 ? null : r.json(); });
 
+// World leaderboard (same service, /scores): b = 'waves' | 'convoy'. No run → the board, a run { ini, wave, gold, combo, ship } → signs it.
+// Resolves { top, rank } (rank: the run's row, -1 off the board). A string body is a simple CORS request: no preflight.
+export const worldScores = (b, run) => fetch(`${ICE_URL}scores?b=${b}`, { method: run ? 'POST' : 'GET', body: run ? JSON.stringify(run) : undefined, signal: AbortSignal.timeout(4000) })
+  .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+
 // h: { open(code), join(id), msg(id, m), leave(id), error(e) }
 // code: a quick-match room's code, handed out by the server
 export function hostRoom(h, code = newCode()) {
