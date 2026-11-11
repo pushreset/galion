@@ -25,6 +25,15 @@ const lobby = (page, re) => page.waitForFunction((src) => new RegExp(src).exec(d
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const count = (page, k) => page.evaluate((k) => snd.filter((n) => n === k).length, k);
 
+// 0. no typed character reaches the browser (Firefox find-as-you-type), mapped or not; shortcuts do
+{
+  const p = await open('keys');
+  await p.evaluate(() => { window.kd = {}; addEventListener('keydown', (e) => { kd[e.code + (e.ctrlKey ? '+ctrl' : '')] = e.defaultPrevented; }); }); // added after the game's listener: it sees its verdict
+  for (const k of ['KeyZ', 'Semicolon', 'Quote', 'Slash', 'KeyQ', 'Control+KeyZ', 'F2']) await p.keyboard.press(k);
+  assert.deepEqual(await p.evaluate(() => kd), { KeyZ: true, Semicolon: true, Quote: true, Slash: true, KeyQ: true, 'ControlLeft+ctrl': false, 'KeyZ+ctrl': false, F2: false });
+  await p.context().close();
+}
+
 // 1. a room that fails to open: no ship can be picked while it opens, and no phantom hulls afterwards
 {
   const p = await open('fail');

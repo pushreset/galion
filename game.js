@@ -184,7 +184,9 @@ addEventListener('keydown', (e) => {
     e.preventDefault(); // the digit picks a ship, it isn't typed
     e.target.blur();
   }
-  // Without this, Firefox's find-as-you-type swallows letter keys and opens its search bar.
+  // Firefox's find-as-you-type opens its search bar on any typed character: a wrong letter, or M, whose code depends on the layout.
+  // So every character is kept from the browser, not only GAME_KEYS. Ctrl / Cmd / Alt shortcuts still pass.
+  if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
   if (e.target.tagName === 'BUTTON') return; // a focused lobby button keeps Enter / Space (the click handlers blur it)
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.repeat) return;
