@@ -90,10 +90,11 @@ export function initScreens(g) {
 
   // 03 · the hub
   screens.menu = {
-    back: false, shot: () => ({ ship: SHIPS.indexOf(store.lastShip), side: 1 }),
+    back: false, shot: (p) => ({ ship: p.ship, side: 1 }), // p.ship: read once in render, the camera asks every frame
     hints: () => [[['↑', '↓'], 'CHOOSE'], [['ENTER'], 'CONFIRM'], [[g.muteLabel()], 'SOUND']],
-    render(el) {
-      const mode = store.lastMode, ship = g.ships[SHIPS.indexOf(store.lastShip)], best = store.best[mode][0];
+    render(el, props) {
+      props.ship = SHIPS.indexOf(store.lastShip);
+      const mode = store.lastMode, ship = g.ships[props.ship], best = store.best[mode][0];
       const item = (f, title, sub, extra = '') => `<button class="bs-btn" data-f="${f}"${extra}><span>${title}</span><span>${sub}</span></button>`;
       el.innerHTML = `<div class="bs-abs bs-logo bs-logo--s" style="left:64px;top:52px">BROADSIDE</div>
         <div class="bs-abs bs-chip" style="right:32px;top:28px">${skull(16)}<span class="bs-dim">CAPTAIN</span><span class="bs-gold" style="font-size:16px;line-height:16px;letter-spacing:1px">${esc(store.name)}</span><button class="bs-btn bs-btn--s" data-f="edit" aria-label="Change name">EDIT</button></div>
@@ -107,7 +108,7 @@ export function initScreens(g) {
         ${best ? `<div class="bs-abs bs-chip bs-col" style="right:32px;bottom:44px;align-items:flex-end;gap:4px;padding:8px 12px"><span class="bs-dim" style="letter-spacing:1px">YOUR BEST · ${mode.toUpperCase()}</span>
           <span style="font-size:16px;line-height:16px">${mode === 'convoy' ? 'CONVOY' : 'WAVE'} ${best.wave} · <span class="bs-gold">${num(best.gold)} GOLD</span>${best.world ? ` · #${best.world} WORLD` : ''}</span></div>` : ''}`;
       return { acts: {
-        sail: () => g.startSolo(mode, SHIPS.indexOf(store.lastShip)),
+        sail: () => g.startSolo(mode, props.ship),
         solo: () => ui.open('solo-mode'),
         online: () => ui.open('online'),
         board: () => ui.open('leaderboard'),
@@ -200,7 +201,7 @@ export function initScreens(g) {
     render(el, props) {
       const { entry: e, top, rank, name } = props, m = MODE[e.mode], solo = e.crew.length === 1;
       // an older row of ours further down: how many places this run gained on it
-      const old = rank < 0 ? -1 : top.findIndex((r, i) => i > rank && (solo ? r.crew[0].name === name : mine(r, name)));
+      const old = rank < 0 ? -1 : top.findIndex((r, i) => i > rank && mine(r, name));
       const gain = old - rank - 1;
       const from = Math.max(0, Math.min(rank - 2, top.length - 4));
       const row = (r, i) => `<div class="bs-over-row${i === rank ? ' is-you' : ''}"><span>${i + 1}</span><span>${esc(r.crew[0].name)}${r.crew.length > 1 ? ` +${r.crew.length - 1}` : ''}${i === rank && gain > 0 ? ` <span class="bs-over-up">▲ ${gain}</span>` : ''}</span><span>${+r.wave}</span><span>${num(r.gold)}</span><span>×${+r.combo}</span></div>`;
@@ -355,7 +356,7 @@ export function initScreens(g) {
       props.mode ??= store.lastMode;
       props.world ??= {}; // board → rows | 'fail', read once per visit
       const name = store.name, m = MODE[props.mode], board = boardOf(props.mode, props.crew ? 2 : 1);
-      const yours = (r) => (r.crew.length === 1 ? r.crew[0].name === name : mine(r, name));
+      const yours = (r) => mine(r, name);
       for (const b of [props.mode, props.mode + '-crew']) if (!props.local && !(b in props.world)) { // both: the footer ranks you on each
         props.world[b] = null;
         g.world(b).then((rows) => rows, () => 'fail').then((rows) => {
@@ -365,9 +366,10 @@ export function initScreens(g) {
           if (!props.touched) ui.focus(); // nothing pressed yet: land on your row, or the first
         });
       }
-      const rows = props.local ? store.best[board] : props.world[board];
+      const lists = props.local ? store.best : props.world; // board → rows
+      const rows = lists[board];
       const you = Array.isArray(rows) ? rows.findIndex(yours) : -1;
-      const best = (b) => { const l = props.local ? store.best[b] : props.world[b], i = Array.isArray(l) ? l.findIndex(yours) : -1; return i < 0 ? '–' : `<span class="bs-gold">#${i + 1}</span>`; };
+      const best = (b) => { const l = lists[b], i = Array.isArray(l) ? l.findIndex(yours) : -1; return i < 0 ? '–' : `<span class="bs-gold">#${i + 1}</span>`; };
       const seg = (f, on, label) => `<button data-f="${f}" aria-pressed="${on}">${label}</button>`;
       const line = (r, i) => `<div class="bs-lb-item${i === you ? ' is-you' : ''}" tabindex="0" data-f="r${i}"${i === Math.max(you, 0) ? ' data-first' : ''}><div class="bs-lb-row"><span>${i + 1}</span>
         <span class="bs-row" style="gap:8px;min-width:0">${esc(r.crew[0].name)}${r.crew.length > 1 ? `<span class="bs-badge bs-badge--off">+${r.crew.length - 1}</span>` : ''}${i === you ? `<span class="bs-badge bs-badge--you">${r.crew.length > 1 ? 'YOUR CREW' : 'YOU'}</span>` : ''}</span>

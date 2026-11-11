@@ -192,7 +192,9 @@ let keys = {}, actionOf = {};
 function rekey() {
   keys = store.keys;
   // M sits on another physical key in AZERTY: until the player picks a key, mute is the key that types M when the browser knows it
-  if (keys.mute === DEFAULT_KEYS.mute) keys.mute = ui.codeFor('m') || DEFAULT_KEYS.mute;
+  // (not when another action already has that key: mute stays where it is)
+  const m = ui.codeFor('m');
+  if (keys.mute === DEFAULT_KEYS.mute && m && !Object.values(keys).includes(m)) keys.mute = m;
   actionOf = Object.fromEntries(Object.entries(keys).map(([a, c]) => [c, a]));
   const k = (a) => `<kbd>${ui.esc(ui.keyLabel(keys[a]))}</kbd>`;
   $('help').innerHTML = `${k('sailUp')}/${k('sailDown')} sail up/down · ${k('turnLeft')}/${k('turnRight')} turn · ${k('firePort')} fire left · ${k('fireStarboard')} fire right · ${k('skill1')}-${k('skill4')} skills · ${k('board')} board · ${k('mute')} sound · ${k('overview')} zoom · ${k('pause')} pause`;
@@ -200,10 +202,13 @@ function rekey() {
   $('k-port').textContent = ui.keyLabel(keys.firePort);
   $('k-star').textContent = ui.keyLabel(keys.fireStarboard);
   $('k-board').textContent = ui.keyLabel(keys.board);
+  $('cards-h').textContent = `Refit your ship: click or press ${ui.keyLabel(keys.skill1)}, ${ui.keyLabel(keys.skill2)} or ${ui.keyLabel(keys.skill3)}`;
   skillSig = cardSig = ''; // their key labels are redrawn
 }
-// the numpad digits follow the digit row. Mute: where the browser does not tell the layout (Firefox, Safari), the default is whatever key types M
-const actionFor = (e) => actionOf[e.code.replace(/^Numpad(\d)$/, 'Digit$1')] || (keys.mute === DEFAULT_KEYS.mute && !ui.hasLayout() && /^m$/i.test(e.key) ? 'mute' : undefined);
+// a numpad digit bound on its own is that action; unbound, it follows the digit row
+const actionAt = (code) => actionOf[code] || actionOf[code.replace(/^Numpad(\d)$/, 'Digit$1')];
+// Mute: where the browser does not tell the layout (Firefox, Safari), the default is whatever key types M
+const actionFor = (e) => actionAt(e.code) || (keys.mute === DEFAULT_KEYS.mute && !ui.hasLayout() && /^m$/i.test(e.key) ? 'mute' : undefined);
 function toggleMute() {
   const a = store.audio;
   a.muted = !a.muted;
@@ -277,6 +282,7 @@ function castSkill(p, slot) {
 let paused = false;
 function openPause() {
   if (state.mode === 'select' || (net === 'guest' && guestShip === null)) return; // no run yet
+  if (state.mode === 'dead') return; // sunk: the end screen is 3 s away, and a paused world would never get there to sign the run
   held.clear(); // a key released under the overlay never sends keyup to the game
   if (net === 'solo') { paused = true; setPaused(true); }
   ui.open('pause', { online: net !== 'solo' });
@@ -904,7 +910,7 @@ function endRun() {
   worldScores(board, entry.wave > 0 && entry).then((r) => {
     const top = r.top.map(normRow).filter(Boolean); // a service from before names answers its old rows
     if (entry.wave > 0 && r.rank >= 0) { Object.assign(res, { world: r.rank, top, rank: r.rank }); markWorld(board, entry.at, r.rank + 1); }
-    else res.world = -1; // off the world's top 100: this browser's rows stay
+    else if (entry.wave > 0) res.world = -1; // off the world's top 100: this browser's rows stay (wave 0 was never sent: no world rank)
     if (ui.top() === 'gameover') ui.refresh();
   }).catch(() => ui.toast('warn', 'WORLD BOARD UNREACHABLE · SAVED ON THIS BROWSER', 5000)); // down, or it refused the run (its limit per address, its bounds)
 }
@@ -1030,7 +1036,7 @@ const setHTML = (el, h) => { if (el._h !== h) el.innerHTML = el._h = h; }; // pe
 function hud() {
   $('banner').hidden = state.banner <= 0 || !!state.boarding;
   $('room').hidden = net === 'solo';
-  if (net !== 'solo') setHTML($('room'), net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${esc(room.code())}</b> · ${players.length}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${players.length} PIRATES`);
+  if (net !== 'solo') setHTML($('room'), net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${ui.esc(room.code())}</b> · ${players.length}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${players.length} PIRATES`);
   if (!me) return;
   const on = fortsOn(), goal = convoy && state.mode === 'fight' && route()[1];
   radar(me, ships, loot, forts.map((f) => ({ x: f.x, z: f.z, active: on && f.alive })), ISLANDS.filter((I) => I.kind === 'port').map((I) => ({ x: I.x, z: I.z, goal: I === goal })));
@@ -1251,7 +1257,6 @@ function syncList(list, map, rows, keys, make) {
   }
 }
 const nick = cleanName; // also cleans what a guest or host sends
-const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 function applySnap(m) {
   // glide over the gap the snapshots really arrive at (3 or 4 host frames, more on a slow link), not a fixed 50 ms
   const now = performance.now();
@@ -1289,8 +1294,8 @@ function applySnap(m) {
     const s = ships.find((o) => o.pid === e.pid);
     if (!s) continue;
     // host strings end up in innerHTML (scoreboard, cards, leaderboard): a guest never trusts them
-    Object.assign(e, { tag: nick(e.tag) || 'P' + ((e.pid | 0) + 1), name: esc(e.name), kills: +e.kills || 0,
-      cards: (e.cards || []).map((c) => ({ id: String(c.id), label: esc(c.label) })),
+    Object.assign(e, { tag: nick(e.tag) || 'P' + ((e.pid | 0) + 1), name: ui.esc(e.name), kills: +e.kills || 0,
+      cards: (e.cards || []).map((c) => ({ id: String(c.id), label: ui.esc(c.label) })),
       skills: (e.skills || []).filter((k) => Object.hasOwn(SKILLS, k.id)).slice(0, 4).map((k) => ({ id: k.id, lvl: Math.max(1, Math.min(3, k.lvl | 0)) })),
       cd: e.cd || {}, reload: e.reload || { port: 0, star: 0 } }); // a bad value here would throw in hud() and stop the frame loop
     players.push(Object.assign(s, e));
@@ -1621,7 +1626,7 @@ initScreens({
   world: (b) => worldScores(b).catch((e) => (b.endsWith('-crew') ? worldScores(b.replace('-crew', '')) : Promise.reject(e)))
     .then((r) => r.top.map(normRow).filter((row) => row && (row.crew.length > 1) === b.endsWith('-crew'))),
   pauseKeys: () => [ui.keyLabel(keys.pause), 'ESC'],
-  isPause: (code) => actionOf[code] === 'pause',
+  isPause: (code) => actionAt(code) === 'pause',
 });
 function startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); }
 ui.setOnChange(() => { document.body.classList.toggle('menus', ui.active()); rekey(); }); // rekey: labels follow the keyboard layout once the browser tells it

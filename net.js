@@ -61,7 +61,8 @@ export function hostRoom(h, code = newCode()) {
       conns.set(id, c); seen.set(id, performance.now()); // seat taken now, not at open: overlapping joins can't pass the cap (never opens: TIMEOUT frees it)
       c.on('open', () => { if (conns.get(id) !== c) return; seen.set(id, performance.now()); h.join(id); });
       c.on('data', (d) => { if (conns.get(id) !== c) return; seen.set(id, performance.now()); const m = dec(d); if (m && m.t !== 'ping') h.msg(id, m); });
-      c.on('close', () => { if (conns.get(id) === c) drop(id); }); // a late close from the seat's previous holder must not kick the new one
+      // a late close from the seat's previous holder must not kick the new one; a closed room (`dead`) calls nothing back: the game's lobby is gone, or is the next room's
+      c.on('close', () => { if (!dead && conns.get(id) === c) drop(id); });
     });
   });
   return {

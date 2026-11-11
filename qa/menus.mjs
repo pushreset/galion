@@ -270,6 +270,22 @@ if (SHOTS) for (const [w, h] of [[960, 540], [1440, 900], [1920, 1080]]) {
   await p.context().close();
 }
 
+// 5. a numpad key bound on its own, the refit heading's keys, no pause between sinking and the end screen
+{
+  const p = await open('numpad', { store: { ...NAMED, keys: { sailUp: ['Numpad8'], pause: ['Numpad5'], skill1: ['ShiftLeft'] } }, boot: 'sail' }); // ShiftLeft: its label is the same on every layout
+  await p.keyboard.press('Numpad8');
+  assert.equal(await p.evaluate(() => __game.player.sail), 1, 'Numpad8 is SAIL UP, not the digit row 8');
+  await p.keyboard.press('Numpad5'); assert.equal(await top(p), 'pause');
+  await p.keyboard.press('Numpad5'); assert.equal(await top(p), undefined, 'the pause screen knows the same key');
+  assert.equal(await text(p, '#cards-h'), 'Refit your ship: click or press L SHIFT, 2 or 3');
+  await p.evaluate(() => { __game.player.hp = 0; __game.player.alive = false; __game.advance(1); });
+  await p.keyboard.press('Escape');
+  assert.deepEqual(await p.evaluate(() => [__game.state.mode, __game.ui.top()]), ['dead', undefined], 'sunk: no pause before the end screen');
+  await p.evaluate(() => __game.advance(3));
+  assert.equal(await top(p), 'gameover', 'the run is signed');
+  await p.context().close();
+}
+
 assert.deepEqual(errors, [], 'page errors');
 await browser.close();
 console.log('menus ok');
