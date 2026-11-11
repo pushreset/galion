@@ -37,6 +37,23 @@ Backlog d'idées pour la suite. Coût : **S** = quelques heures, **M** = une dem
 |---|---|---|
 | **Météo** | Tempête (houle, éclairs, mer qui bouge le bateau), brouillard (boussole réduite, ennemis qui surgissent), calme plat (vent nul). | M |
 
+## Abordage
+
+Aujourd'hui : `Espace` au contact, capture automatique sous 20 % de coque, sinon une barre de timing avec le monde en pause. En ligne il n'y a pas de pause, donc pas de barre : seuls les navires rendus sont abordables. Les pistes ci-dessous cherchent d'abord à supprimer cette pause, pour avoir la même règle en solo et en ligne.
+
+| Idée | Ce que ça apporte | Talent testé | En ligne | Coût |
+|---|---|---|---|---|
+| **1. Mêlée en temps réel, navires liés** | Grappins posés, les deux coques dérivent ensemble. Les manches de `boardRound` tombent toutes les 0,6 s environ, sans figer le monde : les autres ennemis continuent de tirer. Le joueur choisit de tenir ou de couper les grappins (`Espace` à nouveau). | Gestion du risque | Oui | M |
+| **2. La manœuvre fait la qualité** | Plus de barre : `q` se calcule à l'accroche. Flanc contre flanc à vitesses proches, `q` haut ; arrivée de travers ou trop vite, `q` bas (ou éperonnage). | Pilotage | Oui | S |
+| **3. Grappin lancé** | `Espace` tire un grappin à 12 de portée environ. Touché : une corde, puis un treuil qui rapproche les navires pendant 3 s. La corde casse si la distance ou l'angle dérape, donc il faut tenir un cap parallèle. Les boulets ramés ralentissent la cible. En PvP, la victime casse la corde en virant. | Visée et tenue de cap | Oui | M |
+| **4. Moral : l'abordage se gagne au canon** | Une jauge de moral par ennemi : coque, équipage, alliés proches. Nouvelle munition, la mitraille : peu de dégâts à la coque, beaucoup à l'équipage. Moral à zéro : pavillon blanc, capture sans mini-jeu. C'est la règle des 20 % généralisée. | Choix de munition | Oui | M |
+| **5. Ordres en pierre-feuille-ciseaux** | Trois manches, trois ordres : la charge bat les mousquets, les mousquets battent le retranchement, le retranchement bat la charge. L'ennemi annonce son ordre selon son type (marine : mousquets, marchand : retranchement). | Lecture de l'adversaire | Avec un chrono | M |
+| **6. Détachement d'abordage** | Maintenir `Espace` charge le nombre d'hommes envoyés. Plus d'hommes : mêlée plus sûre, mais recharge plus lente à bord (`crewMul` existe déjà). Prise gagnée : l'équipage de prise reste dessus, le navire devient une escorte (`guardSteer`) ou se ramène au port. | Répartition de l'équipage | Oui | M |
+
+Recommandé : **2 et 1 ensemble**. `boardRound(b, q)` prend déjà un `q` entre 0 et 1 : il suffit de le calculer depuis l'angle et la vitesse relative, puis de faire tomber les manches en temps réel, navires liés. La barre et la pause disparaissent, et il reste moins de code qu'aujourd'hui. Ensuite la mitraille (4), si l'équipage doit devenir une vraie cible. L'idée 5 est la moins bonne : elle garde un écran à part et casse le rythme naval.
+
+Liens avec la section suivante : l'éperonnage ouvre l'abordage (2), le sabordage presse le joueur une fois le pavillon blanc hissé (4), l'officier Grappins double la portée (3), le Mousquetaire tue de l'équipage avant le contact (4), le remorquage prolonge la prise (6).
+
 ## Inspiré de Pirates du Nouveau Monde
 
 Le jeu de plateau qui a donné l'envie de Broadside : *Pirates of the Spanish Main* (WizKids, 2004), vendu en France par Asmodée. Navires à monter, un mât par point de vie, or à ramener à son île de départ. Sources lues : règles avancées en français, règles de *Davy Jones' Curse* (terrains, mots-clefs), récapitulatif des équipages et événements (30 pages), [fiche G-Fig](https://g-fig.fr/jeu-416-pirates_of_the_spanish_main_pirates_du_nouveau_monde.html). Pas lues : les règles des forts et la liste complète des mots-clefs.
