@@ -22,15 +22,17 @@ const PING = '{"t":"ping"}';
 const BACKLOG = 65536; // bytes queued on a guest's channel (a dozen snapshots or more) before the host skips some
 const newCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
 
+// one call to the service: 4 s to answer, a refusal (400, 429) throws, 204 is null
+const call = (path, init) => fetch(ICE_URL + path, { ...init, signal: AbortSignal.timeout(4000) })
+  .then((r) => { if (!r.ok) throw new Error(r.status); return r.status === 204 ? null : r.json(); });
+
 // Quick match (same service, /match): q = 'pvp' | 'coop-waves' | 'coop-convoy'. Resolves { host: code } | { join: code } |
 // { retry } for a lookup, null for a host heartbeat (extra = '&code=ABCD&free=2'); a guest that could not get in passes '&skip=ABCD'.
-export const match = (q, extra = '') => fetch(`${ICE_URL}match?q=${q}${extra}`, { signal: AbortSignal.timeout(4000) })
-  .then((r) => { if (!r.ok) throw new Error(r.status); return r.status === 204 ? null : r.json(); });
+export const match = (q, extra = '') => call(`match?q=${q}${extra}`);
 
 // World leaderboard (same service, /scores): b = 'waves' | 'convoy'. No run → the board, a run { ini, wave, gold, combo, ship } → signs it.
 // Resolves { top, rank } (rank: the run's row, -1 off the board). A string body is a simple CORS request: no preflight.
-export const worldScores = (b, run) => fetch(`${ICE_URL}scores?b=${b}`, { method: run ? 'POST' : 'GET', body: run ? JSON.stringify(run) : undefined, signal: AbortSignal.timeout(4000) })
-  .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+export const worldScores = (b, run) => call(`scores?b=${b}`, run && { method: 'POST', body: JSON.stringify(run) });
 
 // h: { open(code), join(id), msg(id, m), leave(id), error(e) }
 // code: a quick-match room's code, handed out by the server

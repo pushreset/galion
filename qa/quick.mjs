@@ -72,7 +72,11 @@ try {
     assert.equal((await post({ ...run, wave: 1 }, '10.3.0.1')).rank, -1, 'a run below the hundredth is not listed');
     assert.equal((await get('scores?b=convoy')).top.length, 0, 'one board per game');
     assert.equal(JSON.parse(readFileSync(SCORES, 'utf8')).waves.length, 100, 'the board is on disk');
+    const solo = { ...run, ship: 'Wasp' };
+    await post(solo, '10.5.0.1', 'convoy');
+    assert.equal((await post({ ...solo, ini: 'BBB' }, '10.5.0.1', 'convoy')).top.length, 2, 'two solo runs with the same score keep their own rows');
     assert.equal(await last(13, () => post(run, '10.4.0.1', 'convoy')), 429, 'signing is rate limited per address');
+    assert.equal(await post(run, '6.6.6.6, 10.4.0.1', 'convoy'), 429, 'an address the client made up in X-Forwarded-For does not get a new limit');
   }
   // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host gets a ship)
   {
