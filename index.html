@@ -6,7 +6,8 @@
 <title>Broadside</title>
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<link href="broadside-ui.css" rel="stylesheet">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0c2140; }
   #c { display: block; image-rendering: pixelated; }
@@ -108,6 +109,7 @@
 </head>
 <body class="selecting">
 <canvas id="c"></canvas>
+<div id="ui" class="bs-ui"><div id="ui-veil"></div><div id="ui-stage"><div id="ui-screen"></div><div id="ui-hints" class="bs-hints"></div><div id="ui-modal"></div><div id="ui-toasts"></div></div></div>
 <div id="select" class="hud panel"><h2>Choose your ship: click or press 1, 2 or 3</h2><div id="select-list"></div>
   <div id="lobby"><button id="gm">GAME: WAVES</button><input id="nick" maxlength="12" placeholder="NAME" autocomplete="off"><button id="quick-coop">QUICK CO-OP</button><button id="quick-pvp">QUICK PVP</button><i class="br"></i>ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
 </div>

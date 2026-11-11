@@ -6,6 +6,7 @@ import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
 import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
 import { hostRoom, joinRoom, match, worldScores, MAX_PLAYERS } from './net.js';
+import * as ui from './ui.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
   const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
@@ -178,6 +179,10 @@ const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '
 const held = new Set();
 const GAME_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC', 'KeyP']);
 addEventListener('keydown', (e) => {
+  if (ui.active()) { // a menu screen is open: every key is its own (a text field keeps its characters)
+    if (e.target.tagName !== 'INPUT' && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
+    return ui.key(e);
+  }
   if (e.target.tagName === 'INPUT') { // typing a room code (letters only): Escape and the ship digits go back to the game
     if (e.code === 'Enter' && e.target.id === 'code') joinGame();
     if (e.code !== 'Escape' && !/^(Digit|Numpad)\d$/.test(e.code)) return;
@@ -1490,7 +1495,7 @@ $('quick-pvp').onclick = (e) => { e.currentTarget.blur(); quickGame('pvp'); };
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
 window.__game = {
-  get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
+  ui, get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
   killWave: () => (state.queue = []) && ships.filter((o) => o.team === 1).forEach((o) => damage(o, 1e9)),
   startWave,
   advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); post.render(scene, camera); },

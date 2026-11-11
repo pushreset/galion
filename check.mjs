@@ -1,4 +1,4 @@
-// node check.mjs — asserts on the pure sim.
+// node check.mjs — asserts on the pure sim, and on what the menus store.
 import assert from 'node:assert/strict';
 import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue } from './sim.js';
 
@@ -423,5 +423,53 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   }
   assert.equal(canBoard(makePlayer(0, 0, 0), makeShip('kraken', 3, 3, 0, 0)), false);
   assert.ok(krakenDue(false, 4) && !krakenDue(false, 5) && krakenDue(true, 3) && !krakenDue(true, 4));
+}
+// store.js: what the menus remember. A fake localStorage; without one (private window) every read is its default.
+{
+  const { store, cleanName, rollName, rebind, swapKeys, DEFAULT_KEYS, normRow, signLocal, boardOf } = await import('./store.js');
+  Object.defineProperty(globalThis, 'localStorage', { value: undefined, writable: true, configurable: true }); // node's own warns when touched
+  assert.equal(store.name, '');
+  assert.equal(store.played, false);
+  assert.deepEqual([store.lastMode, store.lastShip], ['waves', 'corsair']);
+  assert.deepEqual(store.audio, { master: 8, music: 6, fx: 9, muted: false });
+  assert.deepEqual(store.keys, DEFAULT_KEYS);
+  assert.deepEqual(store.display, { hints: true });
+  assert.deepEqual(signLocal('waves', { crew: [{ name: 'ANNE', ship: 'wasp' }], wave: 1, gold: 0, combo: 0, at: 1 }).rank, 0, 'a run is ranked even when it cannot be kept');
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)) };
+  mem.set('gallion-nick', 'jack42!'); // the old lobby field
+  assert.equal(store.name, 'JACK');
+  store.name = 'black beard the terrible';
+  assert.equal(store.name, 'BLACKBEARDTH');
+  assert.equal(cleanName('<b>x'), 'BX');
+  for (let i = 0; i < 200; i++) assert.match(rollName(), /^[A-Z]{1,12}$/);
+  mem.set('broadside.audio', '{"master":11,"music":"x","fx":0,"muted":true}'); // a bad value is its default, not a crash
+  assert.deepEqual(store.audio, { master: 8, music: 6, fx: 0, muted: true });
+  mem.set('broadside.keys', '{broken');
+  assert.deepEqual(store.keys, DEFAULT_KEYS);
+  // keys: reserved ones are refused, a taken one names its action, a swap trades the two
+  assert.deepEqual(rebind(DEFAULT_KEYS, 'board', 'Escape'), { reserved: true });
+  assert.deepEqual(rebind(DEFAULT_KEYS, 'board', 'F5'), { reserved: true });
+  assert.deepEqual(rebind(DEFAULT_KEYS, 'fireStarboard', 'KeyC'), { conflict: 'overview' });
+  assert.equal(rebind(DEFAULT_KEYS, 'fireStarboard', 'KeyE').keys.fireStarboard, 'KeyE', 'its own key is no conflict');
+  const sw = swapKeys(DEFAULT_KEYS, 'fireStarboard', 'overview');
+  assert.deepEqual([sw.fireStarboard, sw.overview], ['KeyC', 'KeyE']);
+  store.keys = sw;
+  assert.equal(store.keys.overview, 'KeyE');
+  assert.deepEqual(JSON.parse(mem.get('broadside.keys')).overview, ['KeyE'], 'stored as code[]');
+  // leaderboard rows from before names; this browser's old top 10s move to the new boards, crews apart
+  assert.deepEqual(normRow({ ini: 'BLA', ship: 'Wasp', wave: 6, gold: 840, combo: 3, date: 5 }), { crew: [{ name: 'BLA', ship: 'wasp' }], wave: 6, gold: 840, combo: 3, at: 5 });
+  assert.deepEqual(normRow({ ini: 'AAA+BBB', ship: 'Wasp+Corsair+Leviathan', wave: 2, gold: 1, combo: 0, date: 0 }).crew.map((c) => c.name + ':' + c.ship), ['AAA:wasp', 'BBB:corsair', 'PIRATE:leviathan']);
+  assert.equal(normRow({ wave: 1 }), null);
+  mem.delete('broadside.best');
+  mem.set('broadside.scores', JSON.stringify([{ ini: 'AAA', ship: 'Wasp', wave: 5, gold: 10, combo: 1, date: 1 }, { ini: 'AAA', ship: 'Wasp+Corsair', wave: 9, gold: 10, combo: 1, date: 1 }]));
+  assert.deepEqual([store.best.waves.length, store.best['waves-crew'].length, store.best.convoy.length], [1, 1, 0]);
+  assert.equal(boardOf('convoy', 3), 'convoy-crew');
+  const run = (wave, gold) => ({ crew: [{ name: 'ANNE', ship: 'wasp' }], wave, gold, combo: 0, at: 0 });
+  assert.equal(signLocal('waves', run(5, 20)).rank, 0, 'same wave: gold decides');
+  assert.equal(signLocal('waves', run(4, 999)).rank, 2);
+  for (let i = 0; i < 9; i++) signLocal('waves', run(7, i));
+  assert.equal(signLocal('waves', run(1, 0)).rank, -1, 'off the top 10');
+  assert.equal(store.best.waves.length, 10);
 }
 console.log('check ok');
