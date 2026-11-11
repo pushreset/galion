@@ -114,7 +114,7 @@ const PREVIEW = PLAYER_SHIPS.map((p, i) => {
 });
 const players = []; // every pirate ship (local + remote); the sim treats them all alike
 let me = null; // the ship this browser steers and looks at
-const localInput = () => ({ turn: (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0), fireL: held.has('KeyQ'), fireR: held.has('KeyE') });
+const localInput = () => ({ turn: (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0), fireL: held.has('KeyQ'), fireR: held.has('KeyE') });
 // enemies chase whichever pirate is closest (a sunk one only if nobody is left afloat)
 function nearestPlayer(o) {
   let best = players[0], bd = Infinity;
@@ -174,9 +174,9 @@ function fortUp(fort) {
 // game flow: fight → lull → pick (upgrade cards) → between → fight … | dead
 const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0, delivered: 0, escorts: 0, port: 0, convoyN: 0, krakenAt: Infinity }; // krakenAt: state.t (waves) / time (PvP) the kraken surfaces // delivered: gold merchants got to port (convoy mode), it pays for more escorts
 
-// input: physical key codes so AZERTY Z/Q/S/D and QWERTY W/A/S/D both work
+// input: arrows steer; the rest are physical key codes, so fire is A/E on AZERTY and Q/E on QWERTY
 const held = new Set();
-const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC', 'KeyP']);
+const GAME_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC', 'KeyP']);
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') { // typing a room code (letters only): Escape and the ship digits go back to the game
     if (e.code === 'Enter' && e.target.id === 'code') joinGame();
@@ -211,7 +211,7 @@ addEventListener('keydown', (e) => {
   if ((state.mode === 'dead' && state.t > 3) && (e.code === 'Space' || e.code === 'Enter')) return location.reload();
   if (e.code === 'Enter' && net === 'host') return sail();
   const msg = e.code === 'Space' && state.mode !== 'pick' ? { t: 'board' }
-    : e.code === 'KeyW' ? { t: 'sail', d: 1 } : e.code === 'KeyS' ? { t: 'sail', d: -1 }
+    : e.code === 'ArrowUp' ? { t: 'sail', d: 1 } : e.code === 'ArrowDown' ? { t: 'sail', d: -1 }
     : pick !== undefined ? (me?.cards?.length ? { t: 'card', i: pick } : { t: 'skill', i: pick }) : null;
   if (!msg) return;
   if (net !== 'guest') { if (me) act(me, msg); return; }

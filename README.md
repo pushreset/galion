@@ -62,12 +62,12 @@ The host runs the whole simulation; guests are thin clients:
 
 ## Controls
 
-Keys are physical positions, so AZERTY (ZQSD) and QWERTY (WASD) both work. AZERTY labels shown:
+Arrows steer. The letter keys are physical positions, so the broadsides are `A` / `E` on AZERTY and `Q` / `E` on QWERTY. AZERTY labels shown:
 
 | Key | Action |
 |---|---|
-| `Z` / `S` | Sail up / down |
-| `Q` / `D` | Turn |
+| `↑` / `↓` | Sail up / down |
+| `←` / `→` | Turn |
 | `A` / `E` | Fire port (left) / starboard (right) broadside |
 | `1`–`4` | Skills |
 | `Space` | Board nearby ship |
