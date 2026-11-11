@@ -250,3 +250,12 @@
 .bs-keyrow.is-on { color: var(--bs-gold); background: var(--bs-wood-hi); box-shadow: inset 0 0 0 2px var(--bs-gold); }
 .bs-keyrow.is-bad { box-shadow: inset 0 0 0 2px var(--bs-red); }
 .bs-banner { gap: 8px; padding: 6px 10px; background: var(--bs-wood-edge); }
+
+/* online hub: the room code, four cells over one hidden field */
+.bs-codein { position: relative; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.bs-codein > span { height: 44px; display: grid; place-items: center; font-size: 24px; line-height: 24px; color: var(--bs-gold); background: var(--bs-wood-edge); box-shadow: inset 0 0 0 2px var(--bs-trim-hi); }
+.bs-codein:focus-within > span { box-shadow: inset 0 0 0 2px var(--bs-gold); }
+.bs-codein.is-bad > span { box-shadow: inset 0 0 0 2px var(--bs-red); }
+.bs-codein > input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; opacity: 0; cursor: text; }
+/* lobby: READY, once said */
+.bs-ready[aria-pressed="true"], .bs-ready[aria-pressed="true"]:focus { color: var(--bs-wood-edge); background: var(--bs-green); box-shadow: inset 0 0 0 2px var(--bs-wood-edge); }

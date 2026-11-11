@@ -113,7 +113,7 @@ export function key(e) {
   if (!modalEl.firstElementChild && t.h.keys?.(e)) return done();
   if (a?.onkey?.(e)) return done(); // a widget's own keys (slider: ← →)
   const arrow = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.code];
-  if (arrow) { if (typing && arrow[0]) return; done(); return move(...arrow); } // in a field ← → move the caret
+  if (arrow) { if (typing && arrow[0] && !a.dataset.nocaret) return; done(); return move(...arrow); } // in a field ← → move the caret (the room code shows none)
   if (e.code === 'Tab') { done(); return tab(e.shiftKey ? -1 : 1); }
   if (e.code === 'Escape' || (e.code === 'Backspace' && !typing)) { // Backspace: fullscreen takes Escape
     done();

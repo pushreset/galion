@@ -109,7 +109,7 @@ export function initScreens(g) {
       return { acts: {
         sail: () => g.startSolo(mode, SHIPS.indexOf(store.lastShip)),
         solo: () => ui.open('solo-mode'),
-        online: () => g.oldPanel(),
+        online: () => ui.open('online'),
         board: () => ui.open('leaderboard'),
         settings: () => ui.open('settings'),
         edit: () => screens.settings && ui.open('settings', { tab: 'profile' }),
@@ -401,6 +401,107 @@ export function initScreens(g) {
           if (e.code === 'KeyY' || /^y$/i.test(e.key)) { if (you >= 0) ui.focus('r' + you); return true; }
           return false;
         } };
+    },
+  };
+
+  // 06 · online hub: quick match, create a room, join one. Network messages are toasts; a bad code is said under the field
+  const QUICK = [['coop-waves', 'CO-OP · WAVES', 'HOLD THE LINE TOGETHER'], ['coop-convoy', 'CO-OP · CONVOY', 'RAID THE MERCHANTS'], ['pvp', 'PVP', 'FIRST TO 10 SINKINGS · 5 MIN']];
+  screens.online = {
+    veil: 0.5, shot: () => ({ wide: true }),
+    hints: [[['←', '→'], 'COLUMN'], [['↑', '↓'], 'CHOOSE'], [['ENTER'], 'GO'], [['ESC'], 'BACK']],
+    render(el, props) {
+      props.code ??= '';
+      const { off, busy, err } = g.hub();
+      const at = (f) => (busy === f ? ' aria-busy="true"' : off || busy ? ' disabled' : '');
+      el.innerHTML = `${head(90, 28, ['MENU', 'ONLINE'], 1, 'GATHER A CREW')}
+        <div class="bs-abs bs-chip" style="right:90px;top:48px"><i style="width:6px;height:6px;background:var(--bs-${off ? 'red' : 'green'})"></i>${off ? 'ONLINE UNAVAILABLE · SOLO STILL WORKS' : `<span>CONNECTED AS <span class="bs-gold">${esc(store.name)}</span></span>`}</div>
+        <div class="bs-abs" style="left:90px;top:104px;width:780px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch">
+          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2 bs-gold">QUICK MATCH</h2><p class="bs-dim">SAIL WITH STRANGERS. THE SHIP LEAVES 15 S AFTER THE ROOM OPENS, FULL OR NOT.</p>
+            <div class="bs-menu">${QUICK.map(([q, l, sub], i) => `<button class="bs-btn" data-f="q-${q}"${i ? '' : ' data-first'}${at('q-' + q)}><span>${l}</span><span>${sub}</span></button>`).join('')}</div></section>
+          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2">CREATE A ROOM</h2><p class="bs-dim">PRIVATE. FRIENDS JOIN WITH A 4-LETTER CODE. YOU PICK THE MODE INSIDE AND SET SAIL WHEN READY.</p>
+            <div style="flex:1;display:grid;place-items:center;min-height:56px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-wood-hi);font-size:24px;line-height:24px;letter-spacing:6px;color:var(--bs-wood-hi)">? ? ? ?</div>
+            <button class="bs-btn" data-f="create" style="align-self:center"${at('create')}>CREATE ROOM</button></section>
+          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2">JOIN A ROOM</h2><p class="bs-dim">TYPE THE CODE YOUR CAPTAIN GAVE YOU. PASTE WORKS TOO.</p>
+            <label class="bs-dim" for="room-code">ROOM CODE</label>
+            <div class="bs-codein${err ? ' is-bad' : ''}"><span></span><span></span><span></span><span></span><input id="room-code" data-f="code" data-nocaret maxlength="8" autocomplete="off" spellcheck="false" aria-describedby="code-err"${err ? ' aria-invalid="true"' : ''}${off || busy ? ' disabled' : ''}></div>
+            <p id="code-err" class="bs-alert" role="alert" style="min-height:24px">${err ? `<b>✕</b> ${esc(err)}` : ''}</p>
+            <button class="bs-btn" data-f="join" style="align-self:center"${at('join')}>JOIN</button></section></div>`;
+      const input = el.querySelector('#room-code'), join = el.querySelector('[data-f=join]'), cells = [...el.querySelectorAll('.bs-codein span')];
+      const show = () => { cells.forEach((c, i) => (c.textContent = props.code[i] || '')); if (!busy) join.disabled = off || props.code.length < 4; };
+      input.value = props.code;
+      input.oninput = () => { props.code = input.value = input.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); show(); }; // a paste is filtered, its first 4 letters kept
+      show();
+      const acts = { create: g.create, join: () => g.join(props.code) };
+      for (const [q] of QUICK) acts['q-' + q] = () => g.quick(q);
+      return { acts, back() { if (busy) g.leave(); ui.pop(); }, keys(e) { if (e.code !== 'Enter' || e.target !== input) return false; if (!e.repeat) g.join(props.code); return true; } };
+    },
+  };
+
+  // 07 · lobby: the room's code or the quick-match clock, the mode, four seats, your ship. The host sets sail; guests say READY
+  const LOBBY_MODE = { waves: ['WAVES', 'HOLD THE LINE TOGETHER'], convoy: ['CONVOY', 'RAID THE MERCHANTS'], pvp: ['PVP', 'FIRST TO 10 SINKINGS OR BEST SCORE AFTER 5 MIN'] };
+  screens.lobby = {
+    veil: 0.5, shot: () => ({ wide: true }),
+    hints() { const L = g.lobby(); return [[['1', '2', '3'], 'SHIP'], [['ENTER'], L.host && !L.quick ? 'SET SAIL' : 'READY'], ...(L.quick ? [] : [[['C'], 'COPY CODE']]), [['ESC'], 'LEAVE']]; },
+    render(el, props) {
+      const L = g.lobby(), n = L.players.length, you = L.players.find((p) => p.pid === L.me), cap = L.players[0]?.name || 'THE CAPTAIN';
+      const ready = L.players.filter((p) => p.ready).length, canSail = L.host && !L.quick;
+      const seat = (p, i) => {
+        if (!p) {
+          const [text, hint] = L.quick ? ['SEARCHING…', 'ANYONE CAN STILL JOIN'] : L.host ? ['WAITING FOR A PIRATE…', i === n ? `SHARE THE CODE ${L.code}` : ''] : ['OPEN SEAT', ''];
+          return `<div class="bs-slot is-empty"><span>SEAT ${i + 1}</span><span style="font-size:16px;line-height:20px">${text}</span><span style="color:var(--bs-trim)">${hint}</span></div>`;
+        }
+        const me = p.pid === L.me, captain = p.pid === 0, badge = captain && me ? 'CAPTAIN · YOU' : captain ? 'CAPTAIN' : me ? 'YOU' : '';
+        return `<div class="bs-slot${me ? ' is-you' : ''}"><div class="bs-row" style="justify-content:space-between;height:12px"><span class="bs-dim">SEAT ${i + 1}</span>${badge ? `<span class="bs-badge${captain ? '' : ' bs-badge--you'}">${badge}</span>` : ''}</div>
+          <div style="height:92px;display:grid;place-items:center;background:var(--bs-sea-1);box-shadow:inset 0 0 0 2px var(--bs-wood-edge);overflow:hidden">${p.ship === null ? '<span style="font-size:32px;line-height:32px;color:var(--bs-wood-hi)">?</span>' : `<img src="${g.thumb(p.ship)}" width="100" height="70" alt="${g.ships[p.ship].name}">`}</div>
+          <span${me ? ' class="bs-gold"' : ''} style="font-size:16px;line-height:16px">${esc(p.name)}</span><span class="bs-dim">${p.ship === null ? 'NO SHIP YET' : g.ships[p.ship].name}</span>
+          <span class="bs-status bs-status--${p.ready ? 'ready' : 'picking'}">${p.ready ? '✓ READY' : p.ship === null ? 'PICKING A SHIP' : 'NOT READY'}</span></div>`;
+      };
+      el.innerHTML = `<div class="bs-abs bs-col" style="left:90px;top:20px;gap:4px"><div class="bs-crumb">ONLINE ▸ ${L.quick ? 'QUICK MATCH' : 'PRIVATE ROOM'}</div><h1 class="bs-h1">${L.quick ? 'QUICK MATCH' : `ROOM ${L.code}`}</h1>
+          <span class="bs-dim">${L.quick ? `${LOBBY_MODE[L.mode][0]} · ROOM ${L.code} · ${n}/4 PIRATES` : `${n}/4 PIRATES ABOARD`}${L.started ? ' · RUN UNDER WAY' : ''}</span></div>
+        ${L.quick ? `<div class="bs-abs bs-panel bs-panel--gold bs-col" style="right:90px;top:16px;width:268px;padding:10px 12px;gap:6px"><div class="bs-row" style="justify-content:space-between;height:40px"><span style="font-size:16px;line-height:16px;letter-spacing:1px">${L.countdown === null ? 'WAITING FOR PIRATES…' : 'SETTING SAIL IN'}</span>
+            <span class="bs-gold" style="font-size:40px;line-height:40px;font-weight:700">${L.countdown ?? ''}</span></div><div style="display:grid;grid-template-columns:repeat(15,1fr);gap:2px">${Array.from({ length: 15 }, (_, i) => `<i style="height:8px;background:var(--bs-${i < (L.countdown ?? 0) ? 'gold' : 'wood-edge'})"></i>`).join('')}</div></div>`
+        : `<div class="bs-abs bs-panel bs-col" style="right:90px;top:12px;padding:8px 12px;gap:4px;align-items:flex-end"><span class="bs-dim" style="letter-spacing:1px">ROOM CODE</span>
+            <div class="bs-row" style="gap:8px"><div class="bs-code">${[...L.code].map((c) => `<span>${c}</span>`).join('')}</div><button class="bs-btn bs-btn--s" data-f="copy" aria-label="Copy room code" style="height:36px;background:var(--bs-wood-hi)">${props.copied ? '✓ COPIED' : 'COPY'}</button></div></div>`}
+        <div class="bs-abs bs-row" style="left:90px;top:116px;width:780px;gap:8px"><span class="bs-dim" style="margin-right:4px">MODE</span>
+          ${(L.quick ? [L.mode] : ['waves', 'convoy', 'pvp']).map((m) => `<button class="bs-btn bs-btn--s" data-f="m-${m}" aria-pressed="${m === L.mode}"${canSail && !L.started ? '' : ' disabled'} style="padding:6px 12px">${LOBBY_MODE[m][0]}</button>`).join('')}
+          <span class="bs-dim" style="margin-left:4px">${L.quick ? LOBBY_MODE[L.mode][1] : L.host ? 'ONLY YOU CAN CHANGE IT' : 'THE CAPTAIN CHOOSES'}</span></div>
+        <div class="bs-abs" style="left:90px;top:152px;width:780px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px">${[0, 1, 2, 3].map((i) => seat(L.players[i], i)).join('')}</div>
+        <div class="bs-abs bs-row" style="left:90px;top:376px;width:780px;gap:8px"><span class="bs-dim" style="margin-right:4px">YOUR SHIP</span>
+          ${g.ships.map((s, i) => `<button class="bs-btn bs-row" data-f="s${i}" aria-pressed="${you?.ship === i}"${i === (you?.ship ?? SHIPS.indexOf(store.lastShip)) && !canSail ? ' data-first' : ''} style="gap:8px;padding:6px 12px">${key(i + 1)}${s.name}</button>`).join('')}
+          ${L.host ? '' : `<button class="bs-btn bs-ready" data-f="ready" aria-pressed="${!!you?.ready}" style="margin-left:auto;padding:6px 12px">${you?.ready ? '✓ READY' : L.started ? '▶ JOIN THE RUN' : 'READY'}</button>`}</div>
+        <div class="bs-abs bs-row" style="left:90px;top:424px;width:780px;justify-content:space-between"><button class="bs-btn" data-f="leave">◀ LEAVE ROOM</button>
+          ${canSail ? `<button class="bs-btn bs-btn--primary" data-f="sail" data-first>${n === 1 ? 'SET SAIL ALONE · 1/4' : ready === n ? 'SET SAIL · ALL READY' : `SET SAIL · ${ready}/${n} READY`} ▶</button>`
+          : `<span class="bs-dim" style="padding:8px 12px;font-size:16px;line-height:16px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-wood-hi)">${L.quick ? 'NOT PICKED AT 0 = YOUR LAST SHIP' : L.started ? 'READY PUTS YOUR SHIP TO SEA' : `WAITING FOR ${esc(cap)} TO SET SAIL…`}</span>`}</div>`;
+      const copy = () => navigator.clipboard?.writeText(L.code).then(() => { props.copied = true; ui.refresh(); setTimeout(() => { props.copied = false; if (ui.top() === 'lobby') ui.refresh(); }, 2000); }, () => {});
+      const acts = { copy, leave: () => g.leave(), ready: g.lobbyReady, sail: g.lobbyStart, s0: () => g.lobbyPick(0), s1: () => g.lobbyPick(1), s2: () => g.lobbyPick(2) };
+      for (const m of ['waves', 'convoy', 'pvp']) acts['m-' + m] = () => g.lobbyMode(m);
+      return { acts, back: acts.leave, keys(e) {
+        const i = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 }[e.code];
+        if (i !== undefined) { g.lobbyPick(i); ui.focus('s' + i); } // the focus follows the pick: Enter is then the main action
+        else if (e.code === 'KeyC' && !L.quick) copy();
+        else if (e.code === 'Enter') { // the main action, unless the focus is on a button that does something else (a ship not picked yet: Enter picks it)
+          const on = document.activeElement?.dataset.f || '';
+          if (/^(leave|copy|m-\w+)$/.test(on) || (/^s\d$/.test(on) && +on[1] !== you?.ship)) return false;
+          if (!e.repeat) (canSail ? g.lobbyStart : g.lobbyReady)();
+        }
+        else return false;
+        return true;
+      } };
+    },
+  };
+
+  // PvP: the match is over. The captain can start another; the others wait or leave
+  screens.pvpover = {
+    veil: 0.72,
+    hints: [[['←', '→'], 'CHOOSE'], [['ESC'], 'MAIN MENU']],
+    render(el, props) {
+      el.innerHTML = `<div class="bs-abs bs-panel bs-col" role="dialog" aria-label="Match over" style="left:260px;top:72px;width:440px;padding:20px 28px;gap:12px;align-items:center">
+        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(--bs-${props.won ? 'gold' : 'red'});text-shadow:3px 3px 0 var(--bs-wood-edge)">${props.won ? 'VICTORY' : 'SUNK'}</h1>
+          <span class="bs-dim" style="letter-spacing:1px">PVP · ${esc(props.rows[0].name)} WINS · ${props.rows[0].kills} SINKINGS</span></div>
+        <div class="bs-col" style="gap:2px;align-self:stretch">${props.rows.map((r, i) => `<div class="bs-over-row${r.you ? ' is-you' : ''}" style="grid-template-columns:36px minmax(0,1fr) 120px 48px"><span>${i + 1}</span><span>${esc(r.name)}</span><span>${esc(r.ship)}</span><span>${+r.kills}</span></div>`).join('')}</div>
+        <div class="bs-row" style="gap:8px;align-self:stretch;justify-content:space-between">${props.host ? '<button class="bs-btn" data-f="again" data-first>▶ REMATCH</button>' : `<span class="bs-dim">WAITING FOR ${esc(props.captain)} TO START A REMATCH…</span>`}<button class="bs-btn" data-f="menu">MAIN MENU</button></div></div>`;
+      const acts = { again: g.rematch, menu: () => g.reboot('menu') };
+      return { acts, back: acts.menu };
     },
   };
 }

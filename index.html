@@ -30,8 +30,8 @@
   #cards h2 { margin: 0 0 10px; font: inherit; font-size: 18px; }
   #cards-list { display: flex; gap: 12px; }
   .card { width: 150px; padding: 14px 10px; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 3px #ad7a48; font-size: 13px; line-height: 1.5; display: grid; gap: 8px; }
-  #select .card, #cards .card { pointer-events: auto; cursor: pointer; }
-  #select .card:hover, #cards .card:hover { box-shadow: inset 0 0 0 3px #ffd24a; }
+  #cards .card { pointer-events: auto; cursor: pointer; }
+  #cards .card:hover { box-shadow: inset 0 0 0 3px #ffd24a; }
   .card kbd { font-size: 22px; }
   .card .icon { width: 32px; height: 32px; image-rendering: pixelated; justify-self: center; }
   #cards[hidden], #banner[hidden], #boarding[hidden], #board-hint[hidden] { display: none; }
@@ -59,17 +59,6 @@
   .pop { position: absolute; transform: translate(-50%, -50%); color: #ffd24a; font-size: 18px; animation: pop 1.2s steps(12) forwards; }
   .pop.combo { color: #ff7a2a; font-size: 26px; margin-top: -28px; }
   @keyframes pop { to { transform: translate(-50%, -250%); opacity: 0; } }
-  #select { left: 50%; bottom: 72px; transform: translateX(-50%); text-align: center; }
-  #select h2 { margin: 0 0 10px; font: inherit; font-size: 18px; }
-  #select-list { display: flex; gap: 12px; }
-  #select .card { width: 190px; text-align: left; }
-  #select .card b { font-weight: normal; font-size: 18px; color: #ffd24a; }
-  #select .blurb { font-size: 11px; color: #ddcda6; }
-  #select .stats { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; align-items: center; font-size: 10px; }
-  #select .bar i { background: #f5ecd2; }
-  #select[hidden] { display: none; }
-  #select .kit { font-size: 10px; line-height: 2; color: #ffd24a; }
-  #select .kit img { width: 16px; height: 16px; image-rendering: pixelated; vertical-align: middle; margin-right: 6px; }
   #skills { right: 256px; bottom: 34px; display: flex; gap: 10px; }
   .slot { position: relative; width: 56px; height: 56px; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 3px #ad7a48; display: grid; place-items: center; }
   .slot img { width: 40px; height: 40px; image-rendering: pixelated; }
@@ -80,13 +69,7 @@
   .slot.armed { border-color: #ffd24a; box-shadow: inset 0 0 0 3px #ff9b26; }
   .slot.locked { opacity: 0.5; } .slot.locked b { font-size: 22px; font-weight: normal; color: #b9a57d; }
   body.selecting #stats, body.selecting #score, body.selecting #radar-box, body.selecting #skills { display: none; }
-  body.menus #select, body.menus #help, #help[hidden] { display: none; } /* a menu screen is open (ui.js) */
-  #lobby { width: 0; min-width: 100%; margin-top: 12px; font-size: 12px; pointer-events: auto; display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
-  #lobby button, #lobby input { font: inherit; color: #f5ecd2; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 2px #ad7a48; padding: 4px 10px; cursor: pointer; }
-  #lobby input { width: 64px; text-transform: uppercase; text-align: center; cursor: text; }
-  #lobby #nick { width: 112px; } #lobby .br { flex-basis: 100%; }
-  #lobby button:disabled, #lobby input:disabled { opacity: 0.5; cursor: default; }
-  #lobby-msg { width: 100%; min-height: 16px; color: #ffd24a; }
+  body.menus #help, body.menus #room, #help[hidden] { display: none; } /* a menu screen is open (ui.js) */
   #room { left: 50%; top: 16px; transform: translateX(-50%); font-size: 12px; text-align: center; line-height: 1.6; }
   #room b { color: #ffd24a; font-weight: normal; font-size: 16px; }
   #room[hidden], #coop[hidden], #pvp[hidden] { display: none; }
@@ -102,9 +85,6 @@
 <body class="selecting">
 <canvas id="c"></canvas>
 <div id="ui" class="bs-ui"><div id="ui-veil"></div><div id="ui-stage"><div id="ui-screen"></div><div id="ui-hints" class="bs-hints"></div><div id="ui-modal"></div><div id="ui-toasts"></div></div></div>
-<div id="select" class="hud panel"><h2>Choose your ship: click or press 1, 2 or 3</h2><div id="select-list"></div>
-  <div id="lobby"><button id="gm">GAME: WAVES</button><input id="nick" maxlength="12" placeholder="NAME" autocomplete="off"><button id="quick-coop">QUICK CO-OP</button><button id="quick-pvp">QUICK PVP</button><i class="br"></i>ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
-</div>
 <div id="room" class="hud panel" hidden></div>
 <div id="stats" class="hud panel">
   <span>HULL</span><div class="bar"><i id="hp"></i></div>

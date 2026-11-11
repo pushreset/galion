@@ -14,16 +14,26 @@ npx serve .        # or: python3 -m http.server
 
 Then open the printed URL. Three.js loads from jsDelivr, so there's no install step.
 
+## Menus
+
+The game opens on a title screen (its first key or click unlocks the browser's audio), asks for a captain name on the first launch, then lands on the main menu: **SET SAIL** (the last solo voyage again), **SOLO** (a mode, then a ship), **ONLINE**, **LEADERBOARD** and **SETTINGS**. In a run, the pause key or `Esc` opens the pause (resume, settings, quit to menu), and the end screen offers to sail again, change ship, see the leaderboard or go back to the menu.
+
+- Everything works with the keyboard alone and with the mouse alone: arrows move the focus, `Enter` confirms, `Esc` or `Backspace` goes back (`Backspace` because fullscreen keeps `Esc`), `Tab` goes to the next group. The mouse moves that same focus.
+- The menus are laid out on a 960×540 stage, scaled by a whole number of device pixels so the pixel font stays sharp (×2 at 1920×1080, ×1.5 at 1440×900 on a Retina screen).
+- The browser remembers the name, the last mode and ship, the volumes, the keys, the key hints setting and its own top 10s (`localStorage`, keys under `broadside.`).
+- **Settings**: master, music and effects volumes and a mute; every game key can be changed (a key already taken offers a swap; `Esc`, `Backspace`, `Enter`, `Tab` and `F1`–`F12` are kept); fullscreen and the key hints strip; the name.
+- A run starts from a fresh page: sail again, change ship and the returns to the menu reload it and say where to land (`sessionStorage`).
+
 ## Online (2-4 players)
 
-Peer-to-peer, no server to run: on the ship select screen, one player clicks **HOST CO-OP** or **HOST PVP** and shares the 4-letter room code; the others type it and click **JOIN**, then everyone picks a ship. The host presses `Enter` to set sail (co-op) or start the match (PvP).
+Peer-to-peer, no server to run. In **ONLINE**, one player clicks **CREATE ROOM** and shares the 4-letter room code; the others type it under **JOIN A ROOM**. Everyone meets in the lobby: the captain picks the mode (waves, convoy or PvP), each pirate picks a ship and says **READY**, and the captain sets sail when they want (a pirate who picked nothing sails the last ship they used). A pirate who joins a room whose run is under way gets the same lobby, and **READY** drops their ship in.
 
-- **Quick match**: **QUICK CO-OP** (waves or convoy, following the **GAME** button) or **QUICK PVP** drops you into a room with strangers, no code to share. The first player in a queue hosts; as soon as someone joins, a 15 s countdown starts (cut short when all 4 pirates have a ship), then the game sets sail on its own; a host who hasn't picked a ship by then gets a random one. Friends can still join a quick room with its code.
+- **Quick match**: **CO-OP · WAVES**, **CO-OP · CONVOY** or **PVP** drops you into a room with strangers, no code to share. The first player in a queue hosts; as soon as someone joins, a 15 s countdown starts in the lobby (cut short when all 4 pirates are ready), then the game sets sail on its own. Friends can still join a quick room with its code.
 
-- **Convoy** (solo or co-op: set the **GAME** button to CONVOY before picking a ship or hosting): its own long map between two ports, forts on the way. Each round a merchant convoy sails port to port with its escort: guards that stay beside the merchants, hunters that come for you. The round ends when every merchant is sunk, captured or in port. Gold that reaches port buys a bigger escort for the next convoys.
+- **Convoy** (solo or co-op): its own long map between two ports, forts on the way. Each round a merchant convoy sails port to port with its escort: guards that stay beside the merchants, hunters that come for you. The round ends when every merchant is sunk, captured or in port. Gold that reaches port buys a bigger escort for the next convoys.
 - **Co-op**: shared gold, bigger waves, each pirate picks their own refit cards; a sunk pirate comes back at the next break, the run ends when the whole crew is sunk.
 - **PvP**: first to 10 sinkings (or most after 5 min). Each sinking refits the winner; merchants keep coming as loot (their barrels patch your hull).
-- Online there's no pause and no boarding QTE: only ships under 20% hull (striking their colours) can be boarded.
+- Online nothing stops and there is no boarding QTE: the pause screen opens but the sea goes on and your ship drifts, and only ships under 20% hull (striking their colours) can be boarded.
 - The host's browser runs the game. It keeps running when that tab is hidden (a worker's timer steps it at 30 Hz, since a hidden tab gets no frames; checked in Chrome), but not if the tab is closed or the browser suspends it.
 
 ### How two distant PCs connect
@@ -49,7 +59,7 @@ When hole punching fails (strict or symmetric NATs, some corporate or mobile net
 
 **Quick match** adds one step before signalling: the same Coolify service that hands out TURN credentials keeps one open room per queue (`pvp`, `coop-waves`, `coop-convoy`). `GET /match?q=pvp` answers `{host: code}` (no open room: you open it, under that code), `{join: code}`, or `{retry}` while the room's host is still registering on PeerJS. The host reports its free seats every 10 s (`&code=…&free=n`; 0 as soon as the game starts, and once its tab has been hidden for over a minute, its pirate being away; before that a guest can still join, and a bell and the tab's title call the host back); a room silent for 25 s is dropped, and a guest who can't get in asks again with `&skip=code`. A host whose room was dropped while it still has free seats relists it with its next heartbeat (when the queue has no open room). The queues live in memory: a restart empties them, games already running don't notice and waiting hosts relist. To test locally, `qa/quick.mjs` runs a copy of the service and points the game at it with `?ice=http://127.0.0.1:3123/`.
 
-**World leaderboard**: the same service keeps a top 100 per game (`waves`, `convoy`) in a JSON file on a Docker volume (`scores`, `/data/scores.json`), so it survives restarts and redeploys. `GET /scores?b=waves` answers `{top, rank}`; `POST /scores?b=waves` with a run (`{ini, wave, gold, combo, ship}`) signs it and answers the board with the run's row. A co-op crew shares one row: each browser signs the same run and the initials add up (`AAA+BBB`). The end screen shows this browser's top 10 first, then the world's once the service answers; a run that misses the local board but makes the world's is signed too. Scores are whatever the browser says (the host runs the game, the server never sees it): the service only checks bounds and limits signings per address, so the board can be forged.
+**World leaderboard**: the same service keeps four top 100s (`waves`, `convoy` for solo runs, `waves-crew`, `convoy-crew` for crews) in a JSON file on a Docker volume (`scores`, `/data/scores.json`), so it survives restarts and redeploys. `GET /scores?b=waves` answers `{top, rank}`; `POST /scores?b=waves` with a run (`{crew: [{name, ship}], wave, gold, combo}`) signs it and answers its board with the run's row. A run is signed on its own with the pirates' names; a name holding a banned word is signed `PIRATE`. The size of the crew picks the board, and a crew shares one row: each of its browsers posts the same run. Rows from before names (three initials) were moved to these boards as they were. The end screen shows this browser's rows around the run first, then the world's once the service answers; when it does not, or refuses the run, the run stays on this browser and a message says so. Scores are whatever the browser says (the host runs the game, the server never sees it): the service only checks bounds and limits signings per address, so the board can be forged.
 
 All of it is free: STUN answers once per connection (a few bytes), and signalling is a handful of messages. Only TURN carries real traffic, and only when the direct link fails.
 
@@ -57,14 +67,15 @@ All of it is free: STUN answers once per connection (a few bytes), and signallin
 
 The host runs the whole simulation; guests are thin clients:
 
-- **Guest → host**: input (`{t: 'in', turn, fireL, fireR}` when it changes) and actions (`sail`, `skill`, `board`, `card`, `ship`), plus a ping every second. The host clamps everything it receives.
-- **Host → guests, 20×/s**: a snapshot with ships (compact arrays), cannonballs, loot, kegs, the fort, game state and HUD data for each pirate. It also carries the one-shot effects of the last 50 ms (hits, splashes, muzzle flashes, popups, sounds). JSON with numbers rounded to 0.01, a few KB per snapshot.
+- **In the lobby**: the host owns its state and sends it whole on every change (`{t: 'lobby', code, quick, mode, countdown, started, players: [{pid, name, ship, ready}]}`); a guest sends its own line (`{t: 'me', nick, ship, ready, last}`). No ship exists before the start: the host builds them all when it sets sail.
+- **Guest → host**: input (`{t: 'in', turn, fireL, fireR}` when it changes) and actions (`sail`, `skill`, `board`, `card`), plus a ping every second. The host clamps everything it receives.
+- **Host → guests, 20×/s once at sea**: a snapshot with ships (compact arrays), cannonballs, loot, kegs, the fort, game state and HUD data for each pirate. It also carries the one-shot effects of the last 50 ms (hits, splashes, muzzle flashes, popups, sounds). JSON with numbers rounded to 0.01, a few KB per snapshot.
 - Guests draw one snapshot behind and glide each value between the last two, so movement stays smooth at 60 fps. Sounds are replayed relative to the guest's own ship.
-- If either side hears nothing for 8 s, the link is dropped: a guest who leaves sinks, and guests go back to the lobby if the host leaves.
+- If either side hears nothing for 8 s, the link is dropped: a guest who leaves sinks, and guests go back to the online hub if the host leaves.
 
 ## Controls
 
-Arrows steer. The letter keys are physical positions, so the broadsides are `A` / `E` on AZERTY and `Q` / `E` on QWERTY. AZERTY labels shown:
+These are the defaults; every one can be changed in **SETTINGS › CONTROLS**. Keys are physical positions, so the broadsides are `A` / `E` on AZERTY and `Q` / `E` on QWERTY, and the settings and the HUD show the letter of your own keyboard. AZERTY labels shown:
 
 | Key | Action |
 |---|---|
@@ -75,7 +86,7 @@ Arrows steer. The letter keys are physical positions, so the broadsides are `A` 
 | `Space` | Board nearby ship |
 | `C` | Toggle overview zoom |
 | `M` | Mute |
-| `P` | Pause |
+| `P` (and `Esc`) | Pause |
 
 ## Features
 
@@ -84,21 +95,25 @@ Arrows steer. The letter keys are physical positions, so the broadsides are `A` 
 - Skill bar (4 slots, learn and level up between waves)
 - Merchant convoys, gold pickup with magnet, combo multiplier (×2 to ×5)
 - Boarding: automatic under 20% hull, otherwise a timing QTE; crew losses and recruits
-- Procedural music and SFX, local top-10 leaderboard and a world top 100
+- Procedural music and SFX, local top-10 leaderboards and world top 100s, solo runs and crews apart
 
 ## Code
 
 | File | Role |
 |---|---|
 | `sim.js` | Pure game simulation (no rendering) |
-| `game.js` | Main loop, input, HUD, game state, online host snapshots / guest rendering |
+| `game.js` | Main loop, input, HUD, game state, online lobby, host snapshots / guest rendering |
+| `ui.js` | Menu shell: scaled stage, screen stack, focus, messages, key labels |
+| `screens.js` | The menu screens |
+| `broadside-ui.css` | Menu tokens and components |
+| `store.js` | What the browser remembers: name, audio, keys, local leaderboards |
 | `net.js` | P2P transport (PeerJS): rooms, messages, heartbeat |
 | `ships.js`, `world.js`, `water.js`, `fx.js` | Three.js scene: ships, islands, sea, effects |
 | `post.js`, `palette.js` | Pixel post-processing and palette |
 | `radar.js` | Compass / radar |
 | `sfx.js` | Sound effects and procedural music |
-| `check.mjs` | Assertions on the sim: `node check.mjs` |
+| `check.mjs` | Assertions on the sim and on `store.js`: `node check.mjs` |
 | `coturn-compose.txt` | Coolify stack: coturn relay + `ice` service (TURN credentials, quick-match queues, world leaderboard) |
-| `qa/` | QA screenshots, two-browser runs (`qa/e2e.mjs`, `qa/quick.mjs`) |
+| `qa/` | QA screenshots, the menus in one browser (`qa/menus.mjs`), two-browser runs (`qa/e2e.mjs`, `qa/quick.mjs`) |
 
 Ideas backlog (in French): [`ideas.md`](ideas.md).

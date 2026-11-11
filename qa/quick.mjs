@@ -26,11 +26,13 @@ async function open(name) {
   const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_|CORS/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
+  await page.addInitScript((captain) => { localStorage.setItem('broadside.name', JSON.stringify(captain)); sessionStorage.setItem('broadside.boot', 'online'); }, name.split(' ')[1].toUpperCase()); // straight to the online hub, named HOST or GUEST
   await page.goto(`${URL}?ice=http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
   return page;
 }
-const lobby = (page, re) => page.waitForFunction((s) => new RegExp(s).test(document.getElementById('lobby-msg').textContent), re.source, { timeout: 30000 });
+// the lobby screen is open and its text matches
+const lobby = (page, re) => page.waitForFunction((s) => __game.ui.top() === 'lobby' && new RegExp(s).test(document.getElementById('ui-screen').textContent.replace(/\s+/g, ' ')), re.source, { timeout: 30000 });
 
 try {
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--ignore-gpu-blocklist', '--use-angle=metal'] });
@@ -86,11 +88,11 @@ try {
     assert.equal(await last(13, () => post(run, '10.4.0.1', 'convoy')), 429, 'signing is rate limited per address');
     assert.equal(await post(run, '6.6.6.6, 10.4.0.1', 'convoy'), 429, 'an address the client made up in X-Forwarded-For does not get a new limit');
   }
-  // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host gets a ship)
+  // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host sails its last ship)
   {
     const H = await open('pvp host'), G = await open('pvp guest');
-    await H.click('#quick-pvp');
-    await lobby(H, /QUICK PVP · waiting/);
+    await H.click('[data-f=q-pvp]');
+    await lobby(H, /QUICK MATCH PVP · ROOM [A-Z]{4} · 1\/4 PIRATES.*WAITING FOR PIRATES…/);
     // the host looks at another tab while it waits: it stays listed, is called back when the guest arrives, and its game goes on
     // without frames (like a real hidden tab: rAF is held back until the tab is shown again)
     const vis = (hidden) => H.evaluate((h) => {
@@ -100,33 +102,34 @@ try {
       document.dispatchEvent(new Event('visibilitychange'));
     }, hidden);
     await vis(true);
-    await G.click('#quick-pvp');
-    await lobby(G, /pick your ship/); // not JOINED PVP: the countdown started when G connected, and a guest without a ship reads it there
+    await G.click('[data-f=q-pvp]');
+    await lobby(G, /SETTING SAIL IN \d+/); // the hidden host counts down, and the guest reads its clock in the lobby
     assert.equal(await H.title(), 'A PIRATE JOINED · COME BACK');
-    await G.evaluate(() => __game.choose(0));
-    await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 }); // the hidden host counts down
+    await G.keyboard.press('Digit1');
+    await lobby(G, /GUESTWASP/);
     assert.ok(await G.evaluate(async () => { // the guest's countdown must not blink between two seconds
-      for (let i = 0; i < 15; i++) { if (document.getElementById('banner').hidden) return false; await new Promise((r) => setTimeout(r, 100)); }
+      for (let i = 0; i < 15; i++) { if (!/SETTING SAIL IN\s*\d+/.test(document.getElementById('ui-screen').textContent)) return false; await new Promise((r) => setTimeout(r, 100)); }
       return true;
     }), 'the countdown stays on screen on the guest');
     await vis(false);
     assert.equal(await H.title(), 'Broadside');
     await H.waitForFunction(() => __game.state.mode === 'pvp', null, { timeout: 25000 });
-    assert.equal(await H.evaluate(() => __game.players.length), 2, 'host and guest both sail');
+    assert.deepEqual(await H.evaluate(() => __game.players.map((p) => `${p.tag}:${p.name}`)), ['HOST:Corsair', 'GUEST:Wasp'], 'host (its last ship) and guest (the one picked) both sail');
+    await G.waitForFunction(() => __game.player && !__game.ui.top(), null, { timeout: 10000 });
     await Promise.all([H.close(), G.close()]);
   }
-  // 2. co-op convoy: its own queue, the host picks a ship, wave 1 sets sail without Enter
+  // 2. co-op convoy: its own queue, each pirate picks a ship in the lobby, wave 1 sets sail when the clock runs out
   {
     const H = await open('coop host'), G = await open('coop guest');
-    for (const p of [H, G]) await p.click('#gm'); // GAME: CONVOY
-    await H.click('#quick-coop');
-    await lobby(H, /QUICK CONVOY · waiting/);
-    await H.evaluate(() => __game.choose(1));
-    await G.click('#quick-coop');
-    await lobby(G, /pick your ship/);
-    await G.evaluate(() => __game.choose(2));
-    await H.waitForFunction(() => __game.state.wave === 1, null, { timeout: 30000 });
-    assert.equal(await H.evaluate(() => __game.players.length), 2, 'both pirates in the convoy run');
+    await H.click('[data-f=q-coop-convoy]');
+    await lobby(H, /QUICK MATCH CONVOY · ROOM/);
+    await H.keyboard.press('Digit2');
+    await G.click('[data-f=q-coop-convoy]');
+    await lobby(G, /QUICK MATCH CONVOY · ROOM [A-Z]{4} · 2\/4 PIRATES/);
+    await G.keyboard.press('Digit3');
+    await G.click('[data-f=ready]');
+    await H.waitForFunction(() => __game.state.wave === 1, null, { timeout: 40000 });
+    assert.deepEqual(await H.evaluate(() => __game.players.map((p) => p.name)), ['Corsair', 'Leviathan'], 'both pirates in the convoy run');
   }
   assert.deepEqual(errors, [], 'page errors');
   console.log('quick match ok');
