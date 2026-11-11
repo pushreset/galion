@@ -4,8 +4,11 @@ import { createSea } from './water.js';
 import { buildShip, setGuns, buildTentacle } from './ships.js';
 import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
-import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
+import { sfx, unlock, setAudio, setPaused, setCombat } from './sfx.js';
 import { hostRoom, joinRoom, match, worldScores, MAX_PLAYERS } from './net.js';
+import * as ui from './ui.js';
+import { initScreens } from './screens.js';
+import { store, SHIPS, DEFAULT_KEYS, cleanName, boardOf, normRow, signLocal, markWorld } from './store.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
   const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
@@ -46,11 +49,19 @@ renderer.shadowMap.type = THREE.BasicShadowMap; // hard shadow edges, no blur to
 
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 400);
-const camDir = new THREE.Vector3(Math.cos(CAM_EL) * Math.cos(CAM_AZ), Math.sin(CAM_EL), Math.cos(CAM_EL) * Math.sin(CAM_AZ));
-camera.position.copy(camDir).multiplyScalar(200);
-camera.lookAt(0, 0, 0);
-const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+// the camera looks from azimuth `camAz`: always CAM_AZ in a run, the menus turn it (title: a slow orbit)
+const camDir = new THREE.Vector3(), camRight = new THREE.Vector3(), camUp = new THREE.Vector3();
+let camAz;
+function setAz(a) {
+  camAz = a;
+  camDir.set(Math.cos(CAM_EL) * Math.cos(a), Math.sin(CAM_EL), Math.cos(CAM_EL) * Math.sin(a));
+  camera.position.copy(camDir).multiplyScalar(200);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld(); // lookAt alone leaves the matrix, and the two screen axes read from it, stale
+  camRight.setFromMatrixColumn(camera.matrixWorld, 0);
+  camUp.setFromMatrixColumn(camera.matrixWorld, 1);
+}
+setAz(CAM_AZ);
 const post = new PixelPost(renderer, camera.near, camera.far);
 
 // Sun high on the camera's left: camera-facing sides stay lit, shadows fall right/away.
@@ -78,7 +89,7 @@ let convoy = false;
 const modeName = () => (mode === 'pvp' ? 'PVP' : convoy ? 'CONVOY' : 'CO-OP');
 let net = 'solo', mode = 'coop', room = null, myPid = 0, roomOpen = false; // roomOpen: the host's room got its code
 // quick match: the server queue this room came from ('pvp' | 'coop-waves' | 'coop-convoy'), the host's countdown end, attempts so far
-let quick = null, quickAt = null, quickSec = null, quickTries = 0, quickBeat = 0;
+let quick = null, quickAt = null, quickTries = 0, quickBeat = 0;
 const events = [];
 for (const k of ['hit', 'splash', 'muzzle']) {
   const f = fx[k];
@@ -114,7 +125,7 @@ const PREVIEW = PLAYER_SHIPS.map((p, i) => {
 });
 const players = []; // every pirate ship (local + remote); the sim treats them all alike
 let me = null; // the ship this browser steers and looks at
-const localInput = () => ({ turn: (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0), fireL: held.has('KeyQ'), fireR: held.has('KeyE') });
+const localInput = () => ({ turn: (held.has('turnRight') ? 1 : 0) - (held.has('turnLeft') ? 1 : 0), fireL: held.has('firePort'), fireR: held.has('fireStarboard') });
 // enemies chase whichever pirate is closest (a sunk one only if nobody is left afloat)
 function nearestPlayer(o) {
   let best = players[0], bd = Infinity;
@@ -174,46 +185,59 @@ function fortUp(fort) {
 // game flow: fight → lull → pick (upgrade cards) → between → fight … | dead
 const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '', queue: [], nextAt: 0, merchants: [], left: 0, delivered: 0, escorts: 0, port: 0, convoyN: 0, krakenAt: Infinity }; // krakenAt: state.t (waves) / time (PvP) the kraken surfaces // delivered: gold merchants got to port (convoy mode), it pays for more escorts
 
-// input: arrows steer; the rest are physical key codes, so fire is A/E on AZERTY and Q/E on QWERTY
+// input: every game key is an action looked up by physical key code (store.js DEFAULT_KEYS, changed in the settings screen),
+// so fire is A/E on AZERTY and Q/E on QWERTY. `held`: the actions whose key is down.
 const held = new Set();
-const GAME_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'KeyQ', 'KeyE', 'Space', 'Enter', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Numpad1', 'Numpad2', 'Numpad3', 'Numpad4', 'Backspace', 'KeyC', 'KeyP']);
+let keys = {}, actionOf = {};
+function rekey() {
+  keys = store.keys;
+  // M sits on another physical key in AZERTY: until the player picks a key, mute is the key that types M when the browser knows it
+  // (not when another action already has that key: mute stays where it is)
+  const m = ui.codeFor('m');
+  if (keys.mute === DEFAULT_KEYS.mute && m && !Object.values(keys).includes(m)) keys.mute = m;
+  actionOf = Object.fromEntries(Object.entries(keys).map(([a, c]) => [c, a]));
+  const k = (a) => `<kbd>${ui.esc(ui.keyLabel(keys[a]))}</kbd>`;
+  $('help').innerHTML = `${k('sailUp')}/${k('sailDown')} sail up/down · ${k('turnLeft')}/${k('turnRight')} turn · ${k('firePort')} fire left · ${k('fireStarboard')} fire right · ${k('skill1')}-${k('skill4')} skills · ${k('board')} board · ${k('mute')} sound · ${k('overview')} zoom · ${k('pause')} pause`;
+  $('help').hidden = !store.display.hints;
+  $('k-port').textContent = ui.keyLabel(keys.firePort);
+  $('k-star').textContent = ui.keyLabel(keys.fireStarboard);
+  $('k-board').textContent = ui.keyLabel(keys.board);
+  $('cards-h').textContent = `Refit your ship: click or press ${ui.keyLabel(keys.skill1)}, ${ui.keyLabel(keys.skill2)} or ${ui.keyLabel(keys.skill3)}`;
+  skillSig = cardSig = ''; // their key labels are redrawn
+}
+// a numpad digit bound on its own is that action; unbound, it follows the digit row
+const actionAt = (code) => actionOf[code] || actionOf[code.replace(/^Numpad(\d)$/, 'Digit$1')];
+// Mute: where the browser does not tell the layout (Firefox, Safari), the default is whatever key types M
+const actionFor = (e) => actionAt(e.code) || (keys.mute === DEFAULT_KEYS.mute && !ui.hasLayout() && /^m$/i.test(e.key) ? 'mute' : undefined);
+function toggleMute() {
+  const a = store.audio;
+  a.muted = !a.muted;
+  store.audio = a;
+  setAudio(a);
+  if (ui.top() === 'settings') ui.refresh();
+}
+addEventListener('pointerdown', () => paused || unlock()); // a reload skips the title: the first click or key of the page unlocks the audio
 addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') { // typing a room code (letters only): Escape and the ship digits go back to the game
-    if (e.code === 'Enter' && e.target.id === 'code') joinGame();
-    if (e.code !== 'Escape' && !/^(Digit|Numpad)\d$/.test(e.code)) return;
-    e.preventDefault(); // the digit picks a ship, it isn't typed
-    e.target.blur();
+  if (!paused) unlock(); // paused: the audio clock stays stopped
+  if (ui.active()) { // a menu screen is open: every key is its own (a text field keeps its characters)
+    if (e.target.tagName !== 'INPUT' && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
+    return ui.key(e);
   }
   // Firefox's find-as-you-type opens its search bar on any typed character: a wrong letter, or M, whose code depends on the layout.
-  // So every character is kept from the browser, not only GAME_KEYS. Ctrl / Cmd / Alt shortcuts still pass.
+  // So every character is kept from the browser, not only the game's keys. Ctrl / Cmd / Alt shortcuts still pass.
   if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
-  if (e.target.tagName === 'BUTTON') return; // a focused lobby button keeps Enter / Space (the click handlers blur it)
-  if (GAME_KEYS.has(e.code)) e.preventDefault();
+  const a = actionFor(e);
+  if (a || /^(Arrow\w+|Space|Enter|Backspace)$/.test(e.code)) e.preventDefault();
   if (e.repeat) return;
-  if (e.code === 'KeyP') return net === 'solo' && togglePause(); // not Esc: Firefox spends it on leaving fullscreen. Online: the world never stops
-  if (paused) return; // before unlock(): it resumes the audio context
-  if (state.entry !== undefined) { // SUNK screen: typing initials, nothing else reacts (no mute, no reload)
-    e.preventDefault();
-    if (/^[a-z]$/i.test(e.key) && state.entry.length < 3) state.entry += e.key.toUpperCase(); // e.key: AZERTY-proof
-    else if (e.code === 'Backspace') state.entry = state.entry.slice(0, -1);
-    else if (e.code === 'Enter' && state.entry) return submitEntry();
-    return showEntry();
-  }
-  unlock();
-  if (state.boarding) { if (e.code === 'Space') boardPress(); return; } // paused: Space is the only input
-  if (e.code === 'KeyC') overview = !overview; // same physical key on AZERTY
-  if (e.key === 'm' || e.key === 'M') toggleMute(); // e.key: M sits on a different physical key in AZERTY
-  held.add(e.code);
-  // physical digit codes: AZERTY users don't need Shift
-  const pick = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4: 3, Numpad1: 0, Numpad2: 1, Numpad3: 2, Numpad4: 3 }[e.code];
-  if (net === 'guest' ? guestShip === null : state.mode === 'select') {
-    if (pick < 3 && (net === 'solo' ? !quick : net === 'guest' ? myPid : roomOpen)) choosePlayer(pick); // solo: not while quick match searches; guest: only once the host said hi; host: once the room is open
-    return;
-  }
-  if ((state.mode === 'dead' && state.t > 3) && (e.code === 'Space' || e.code === 'Enter')) return location.reload();
-  if (e.code === 'Enter' && net === 'host') return sail();
-  const msg = e.code === 'Space' && state.mode !== 'pick' ? { t: 'board' }
-    : e.code === 'ArrowUp' ? { t: 'sail', d: 1 } : e.code === 'ArrowDown' ? { t: 'sail', d: -1 }
+  if (a === 'pause' || e.code === 'Escape') return openPause(); // Escape too, though fullscreen spends it on leaving fullscreen
+  if (state.boarding) { if (a === 'board') boardPress(); return; } // the world is stopped: boarding is the only input
+  if (a === 'overview') overview = !overview;
+  if (a === 'mute') toggleMute();
+  if (a) held.add(a);
+  const pick = { skill1: 0, skill2: 1, skill3: 2, skill4: 3 }[a];
+  if (net === 'guest' ? guestShip === null : state.mode === 'select') return; // no run yet (the menus have the keys then)
+  const msg = a === 'board' && state.mode !== 'pick' ? { t: 'board' }
+    : a === 'sailUp' ? { t: 'sail', d: 1 } : a === 'sailDown' ? { t: 'sail', d: -1 }
     : pick !== undefined ? (me?.cards?.length ? { t: 'card', i: pick } : { t: 'skill', i: pick }) : null;
   if (!msg) return;
   if (net !== 'guest') { if (me) act(me, msg); return; }
@@ -253,23 +277,33 @@ function castSkill(p, slot) {
   if (r.id === 'boost') sfx.splash(1, 0);
   if (r.id === 'chain' || r.id === 'fire' || r.id === 'brace' || r.id === 'repair') sfx.hit(0.5, 0);
 }
+// Pause overlay (screens.js). Solo: the world and the audio clock stop. Online the sea does not stop: the overlay
+// only takes the keys, and the ship drifts.
 let paused = false;
-function togglePause() {
-  paused = !paused;
-  held.clear(); // a key released while paused never sends keyup to the game
-  $('pause').hidden = !paused;
-  setPaused(paused);
+function openPause() {
+  if (state.mode === 'select' || (net === 'guest' && guestShip === null)) return; // no run yet
+  if (state.mode === 'dead') return; // sunk: the end screen is 3 s away, and a paused world would never get there to sign the run
+  held.clear(); // a key released under the overlay never sends keyup to the game
+  if (net === 'solo') { paused = true; setPaused(true); }
+  ui.open('pause', { online: net !== 'solo' });
+}
+function resume() {
+  paused = false;
+  setPaused(false);
+  ui.reset();
+}
+// A run starts from a fresh page: the menus ask for a reload and say where to land (read at the bottom of this file).
+function reboot(to) {
+  try { sessionStorage.setItem('broadside.boot', to); } catch {}
+  location.reload();
 }
 addEventListener('blur', () => { // alt-tab: pause solo, release the keys online (their keyup goes to the other window)
-  if (net === 'solo') return !paused && togglePause();
+  if (net === 'solo') return void (ui.active() || openPause());
   held.clear();
   if (net === 'guest' && guestShip !== null) sendInput(); // now: a hidden tab runs no frames
 });
 
-addEventListener('keyup', (e) => {
-  if (GAME_KEYS.has(e.code)) e.preventDefault();
-  held.delete(e.code);
-});
+addEventListener('keyup', (e) => held.delete(actionFor(e)));
 
 let iw = 2, ih = 2, texel = 1;
 function resize() {
@@ -295,15 +329,20 @@ resize();
 
 const camTarget = new THREE.Vector3();
 function updateCamera(dt, snapNow) {
-  const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // select screen: aim below the row so ships sit above the cards
-  const want = overview ? new THREE.Vector3() : new THREE.Vector3(p.x + Math.cos(p.h) * p.speed * 0.9, 0, p.z + Math.sin(p.h) * p.speed * 0.9);
-  const wantH = overview ? MAP.view : VIEW_H;
+  const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // old select panel: aim below the row so ships sit above the cards
+  // a menu screen frames the scene behind it: { orbit } the three ships turning, { ship, side } one of them on the left (-1) or right (1), else the open sea
+  const sh = state.mode === 'select' ? ui.shot() : null, ship = sh && PREVIEW[sh.ship]; // not under a pause or end screen
+  if (sh?.orbit) setAz(camAz + dt * 0.05); else if (camAz !== CAM_AZ) setAz(CAM_AZ);
+  for (const s of PREVIEW) s.mesh.root.visible = !ship || s === ship; // one ship framed: her sisters are not peeking from under the panels
+  const wantH = sh ? (ship ? 30 : sh.orbit ? 48 : 64) : overview ? MAP.view : VIEW_H;
+  const want = ship ? new THREE.Vector3(ship.x, 0, ship.z).addScaledVector(camRight, -sh.side * wantH * (iw / ih) * 0.24)
+    : sh || overview ? new THREE.Vector3() : new THREE.Vector3(p.x + Math.cos(p.h) * p.speed * 0.9, 0, p.z + Math.sin(p.h) * p.speed * 0.9);
   if (viewH !== wantH) {
     viewH = snapNow || Math.abs(wantH - viewH) < 0.05 ? wantH : viewH + (wantH - viewH) * (1 - Math.exp(-6 * dt));
     setProjection();
   }
   if (snapNow) camTarget.copy(want);
-  else camTarget.lerp(want, 1 - Math.exp(-3 * dt));
+  else camTarget.lerp(want, 1 - Math.exp(-(sh ? 10 : 3) * dt)); // menus: a 300 ms travelling
   // Snap the camera to whole texels along its screen axes: static world pixels stop crawling.
   const r = camTarget.dot(camRight), u = camTarget.dot(camUp);
   const t = camTarget.clone()
@@ -460,18 +499,16 @@ function startWave(k) {
   const [from, to] = route();
   banner(convoy ? `CONVOY ${k} · ${from.name} → ${to.name}` : rebuilt ? `WAVE ${k} · THE FORT IS REBUILT` : fortActive(k) && k === 3 ? `WAVE ${k} · THE FORT OPENS FIRE` : `WAVE ${k}`);
 }
-const statBars = (s) => [
+// a ship's six stats against the best of the three (1 = the top of its gauge)
+const shipStats = (s) => [
   ['SPEED', s.maxSpeed / 14], ['HANDLING', s.turn / 1.4], ['HULL', s.maxHp / 150],
   ['GUNS', s.cannons / 6], ['RELOAD', 2.4 / s.reloadTime], ['CREW', s.maxCrew / 50],
-].map(([k, v]) => `<span>${k}</span><div class="bar"><i style="width:${Math.round(v * 100)}%"></i></div>`).join('');
-$('select-list').innerHTML = PREVIEW.map((s, i) =>
-  `<div class="card"><kbd>${i + 1}</kbd><b>${s.name.toUpperCase()}</b><span class="blurb">${PLAYER_SHIPS[i].blurb}</span><div class="stats">${statBars(s)}</div>` +
-  `<div class="kit">${s.skills.map((k) => `<img src="${ICON[k.id]}">${SKILLS[k.id].name}`).join('<br>')}</div></div>`).join('');
-// mouse: a click on a ship card or a refit card presses its digit key
-// ponytail: replays the key handler so the lobby/pause/guest rules stay in one place
-for (const id of ['select-list', 'cards-list']) $(id).addEventListener('click', (e) => {
+];
+// mouse: a click on a refit card presses its key
+// ponytail: replays the key handler so the pause / guest rules stay in one place
+$('cards-list').addEventListener('click', (e) => {
   const c = e.target.closest('.card');
-  if (c) dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit' + ([...c.parentNode.children].indexOf(c) + 1) }));
+  if (c) dispatchEvent(new KeyboardEvent('keydown', { code: keys['skill' + ([...c.parentNode.children].indexOf(c) + 1)] }));
 });
 function makePirate(s, pid, pick, name) {
   return Object.assign(s, { isPlayer: true, pid, pick, tag: nick(name) || 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
@@ -482,27 +519,22 @@ function hideSelect() {
     scene.remove(s.mesh.root);
     if (ships.includes(s)) ships.splice(ships.indexOf(s), 1);
   }
-  $('select').hidden = true;
   document.body.classList.remove('selecting');
 }
 let guestShip = null;
+// solo and host: this browser's own ship (a guest's is built by the host and comes back in snapshots)
 function choosePlayer(i) {
-  if (net === 'guest') { // the host builds our ship; snapshots bring it back
-    guestShip = i;
-    room.send({ t: 'ship', i, nick: $('nick').value });
-    me = null;
-    hideSelect();
-    return;
-  }
-  me = makePirate(PREVIEW[i], 0, i, $('nick').value);
+  if (net === 'solo') store.lastMode = convoy ? 'convoy' : 'waves'; // the menu's SET SAIL
+  store.lastShip = SHIPS[i];
+  me = makePirate(PREVIEW[i], 0, i, store.name);
   if (!ships.includes(me)) ships.push(me); // a host's previews wait outside the sim (hostGame)
   players.push(me);
   hideSelect();
   state.mode = 'between';
-  state.t = state.nextAt = 0; // nextAt: a PvP room already ran its merchant timer during the host's select
+  state.t = state.nextAt = 0; // nextAt: a PvP room already ran its merchant timer in the lobby
   banner(me.name.toUpperCase() + ' SETS SAIL', 2, true);
 }
-// a guest picked a ship: co-op drops them beside a crewmate, PvP somewhere safe
+// a guest's ship (at the start, or for one who joins a run under way): co-op drops them beside a crewmate, PvP somewhere safe
 function addPlayer(pid, i, name) {
   if (players.some((p) => p.pid === pid) || !PLAYER_SHIPS[i]) return;
   if (state.mode === 'dead') return banner('THIS RUN IS OVER', 3); // no ship: a latecomer must not sign a score for it
@@ -536,7 +568,7 @@ function choose(p, i) {
   if (p === me) { banner(c.label.toUpperCase(), 1.6, true); sfx.coin(); }
 }
 const PICK_TIME = 22; // s since the lull began (cards show at 2.2)
-// host only, online: Enter sets sail for wave 1 (co-op) or starts / restarts the PvP match
+// host only, online: sets sail for wave 1 (co-op) or starts / restarts the PvP match
 function hostStart() {
   if (mode === 'coop') { if (state.mode === 'between' && state.wave === 0) state.go = true; return; }
   if (state.mode === 'pvp' || !me) return;
@@ -610,25 +642,19 @@ function flow(dt) {
   if (state.mode === 'pick' && players.every((p) => !p.cards.length)) { state.mode = 'between'; state.t = 0; }
   if (state.mode === 'between' && state.t > 2.5 && (net === 'solo' || state.wave > 0 || state.go)) startWave(state.wave + 1);
 }
-// quick match, host: a countdown once someone joined (now when every seat is taken and every pirate has a ship), then sail
+// quick match, host: a countdown in the lobby once someone joined (cut short when every seat is taken and every pirate is ready), then the start
 const started = () => (mode === 'pvp' ? state.mode === 'pvp' || state.mode === 'over' : state.go || state.wave > 0);
 const QUICK_WAIT = 15; // s
 function quickFlow() {
-  if (!quick || net !== 'host' || !roomOpen || started()) return;
-  const n = room.guests();
-  if (!n) { quickAt = quickSec = null; return; } // the last guest left: wait for the next one
+  if (!quick || net !== 'host' || !roomOpen || !lobby || lobby.started) return;
+  if (!room.guests()) { quickAt = null; if (lobby.countdown !== null) { lobby.countdown = null; lobbySync(); } return; } // the last guest left: wait for the next one
   quickAt ??= time + QUICK_WAIT;
-  if (n === MAX_PLAYERS - 1 && players.length === MAX_PLAYERS) quickAt = Math.min(quickAt, time);
-  if (time < quickAt) {
-    // once per second, not per frame: guests only re-arm a banner when its text changes (so it must outlast the second), and JOINS / LEFT get to show until the next tick
-    const s = Math.ceil(quickAt - time);
-    if (s !== quickSec) { quickSec = s; banner(`SETTING SAIL IN ${s}`, 1.5); } // rides the snapshot: guests count down too
-    return;
-  }
-  if (!me) choosePlayer(Math.floor(Math.random() * PLAYER_SHIPS.length)); // ponytail: an idle host gets a random ship
-  sail();
+  if (lobby.players.length === MAX_PLAYERS && lobby.players.every((p) => p.ready)) quickAt = Math.min(quickAt, time);
+  const s = Math.ceil(quickAt - time);
+  if (s > 0) { if (s !== lobby.countdown) { lobby.countdown = s; lobbySync(); } return; } // once a second: guests count down too
+  lobbyStart();
 }
-// the host's Enter, or the quick-match clock: a quick room that just started tells the server now (no more guests), not at the next 10 s beat
+// the lobby's SET SAIL, the quick-match clock, or a PvP rematch: a quick room that just started tells the server now (no more guests), not at the next 10 s beat
 function sail() {
   const was = started();
   hostStart();
@@ -676,6 +702,7 @@ function pvpFlow(dt) {
     state.mode = 'over';
     banner(`${top.tag} WINS · ${top.kills} SINKINGS`, 4);
     sfx.fanfare();
+    pvpOver();
   }
 }
 
@@ -864,53 +891,28 @@ function pay(x, z, gold) {
   popup(x, z, `+${gold}`);
   return gold;
 }
-// leaderboard: top 10 in this browser, ranked by wave then gold
-const lbKey = () => (convoy ? 'broadside.convoy' : 'broadside.scores'); // one board per game
-const better = (a, b) => b.wave - a.wave || b.gold - a.gold;
-function loadScores() { try { return JSON.parse(localStorage.getItem(lbKey())) || []; } catch { return []; } }
-function saveScores(list) { try { localStorage.setItem(lbKey(), JSON.stringify(list)); } catch {} } // private window: the run just isn't kept
-let run = null;
+// End of a run (screens.js `gameover`): signed with the pirates' names, no typing. It goes on this browser's board,
+// then on the world's (ice service, net.js); the screen shows the rows around it, on the world board once it answers.
+let over = false;
 function gameOver() {
-  if (state.t > 3 && $('over').hidden) { $('over').hidden = false; endRun(); }
+  if (state.t > 3 && !over) { over = true; endRun(); }
 }
 function endRun() {
-  const ship = players.length > 1 ? players.map((p) => p.name).join('+') : me.name; // online: the whole crew signs
-  run = { ini: '', wave: state.wave, gold: state.gold, ship, combo: combo.best, date: Date.now() };
-  const list = loadScores();
-  if (list.length < 10 || better(run, list[list.length - 1]) < 0) { state.entry = ''; showEntry(); }
-  else { showBoard(list, -1); worldBoard(false); }
-}
-// The world's top 100 (ice service, net.js) takes over from this browser's board once it answers; offline or service down, the local one stays.
-// signed: the run goes up with its initials. Not signed (off this browser's top 10): the run may still make the world's, then it is signed after all.
-// A signing the service refuses (its limit per address, its bounds) or never gets says so under the local board: the run is not up there.
-function worldBoard(signed) {
-  const scored = run.wave > 0; // sunk before wave 1 (a crew ramming each other): the service takes no such run, the board is only read
-  worldScores(convoy ? 'convoy' : 'waves', signed && scored && run).then(({ top, rank }) => {
-    if (!signed && scored && (top.length < 100 || better(run, top[top.length - 1]) < 0)) { state.entry = ''; showEntry(); }
-    else showBoard(top, rank, 'WORLD TOP 100');
-  }).catch(() => { if (signed && scored) $('over-stats').insertAdjacentHTML('beforeend', 'NOT SIGNED ON THE WORLD BOARD'); });
-}
-function showEntry() {
-  const ini = (state.entry + '___').slice(0, 3).split('').join(' ');
-  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<br>NEW HIGH SCORE! <b class="ini">${ini}</b><br><kbd>Enter</kbd> to sign`;
-  $('over-help').hidden = true;
-}
-function submitEntry() {
-  run.ini = state.entry;
-  state.entry = undefined;
-  const list = [...loadScores(), run].sort(better).slice(0, 10);
-  saveScores(list);
-  if (list[0] === run) sfx.fanfare();
-  showBoard(list, list.indexOf(run));
-  worldBoard(true);
-}
-function showBoard(list, mine, title = 'THIS BROWSER') {
-  // esc: the world's rows come from the network
-  const rows = list.map((s, i) => `<tr${i === mine ? ' class="me"' : ''}><td>${i + 1}</td><td>${esc(s.ini)}</td><td>${+s.wave}</td><td>${+s.gold}</td><td>×${+s.combo}</td><td>${esc(s.ship)}</td></tr>`).join('');
-  $('over-stats').innerHTML = `${convoy ? 'Convoy' : 'Wave'} ${run.wave} · ${run.gold} gold<br>${title}<div id="lb-box"><table id="lb"><tr><th>#</th><th>NAME</th><th>${convoy ? 'CONVOY' : 'WAVE'}</th><th>GOLD</th><th>COMBO</th><th>SHIP</th></tr>${rows}</table></div>`;
-  $('over-help').hidden = false;
-  const row = document.querySelector('#lb .me'), box = $('lb-box'); // a hundred rows scroll: bring the player's own into view
-  if (row) box.scrollTop = row.offsetTop - box.clientHeight / 2; // not scrollIntoView: it scrolls the page too, and would shift the HUD on a short screen
+  const m = convoy ? 'convoy' : 'waves';
+  const crew = [...players].sort((a, b) => a.pid - b.pid).map((p) => ({ name: p.tag, ship: String(p.name).toLowerCase() })); // online: the whole crew signs, in seat order
+  const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: state.wave, gold: state.gold, combo: combo.best, at: Date.now() };
+  const local = signLocal(board, entry);
+  const res = { entry, board, name: me?.tag || store.name, online: net !== 'solo', best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
+  held.clear();
+  ui.open('gameover', res);
+  if (local.rank === 0) sfx.fanfare();
+  // sunk before wave 1 (a crew ramming each other): the service takes no such run, its board is only read
+  worldScores(board, entry.wave > 0 && entry).then((r) => {
+    const top = r.top.map(normRow).filter(Boolean); // a service from before names answers its old rows
+    if (entry.wave > 0 && r.rank >= 0) { Object.assign(res, { world: r.rank, top, rank: r.rank }); markWorld(board, entry.at, r.rank + 1); }
+    else if (entry.wave > 0) res.world = -1; // off the world's top 100: this browser's rows stay (wave 0 was never sent: no world rank)
+    if (ui.top() === 'gameover') ui.refresh();
+  }).catch(() => ui.toast('warn', 'WORLD BOARD UNREACHABLE · SAVED ON THIS BROWSER', 5000)); // down, or it refused the run (its limit per address, its bounds)
 }
 function updateLoot(dt) {
   for (let i = loot.length - 1; i >= 0; i--) {
@@ -1016,7 +1018,7 @@ function step(dt) {
   wakes.update(dt);
   updateCamera(dt, false);
   hud();
-  if (net === 'host' && (snapT += dt) >= SNAP_DT - 1e-6) { snapT = (snapT - SNAP_DT) % SNAP_DT; if (room.guests()) room.broadcast(snap()); else events.length = 0; } // the remainder is kept: 20 Hz on average at any frame rate. Nobody listening: no snapshot
+  if (net === 'host' && (snapT += dt) >= SNAP_DT - 1e-6) { snapT = (snapT - SNAP_DT) % SNAP_DT; if (room.guests() && lobby?.started) room.broadcast(snap()); else events.length = 0; } // the remainder is kept: 20 Hz on average at any frame rate. Nobody listening, or still in the lobby: no snapshot
 }
 function pirateSunk(s) {
   s.cards = [];
@@ -1034,11 +1036,7 @@ const setHTML = (el, h) => { if (el._h !== h) el.innerHTML = el._h = h; }; // pe
 function hud() {
   $('banner').hidden = state.banner <= 0 || !!state.boarding;
   $('room').hidden = net === 'solo';
-  if (net !== 'solo') {
-    const n = players.length, wait = net === 'host' && (mode === 'coop' ? state.mode === 'between' && state.wave === 0 && !state.go : state.mode !== 'pvp');
-    setHTML($('room'), (net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${esc(room.code())}</b> · ${n}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${n} PIRATES`) +
-      (wait && me ? `<br><kbd>Enter</kbd> ${mode === 'pvp' ? (state.mode === 'over' ? 'rematch' : 'start the match') : 'set sail'}` : ''));
-  }
+  if (net !== 'solo') setHTML($('room'), net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${ui.esc(room.code())}</b> · ${players.length}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${players.length} PIRATES`);
   if (!me) return;
   const on = fortsOn(), goal = convoy && state.mode === 'fight' && route()[1];
   radar(me, ships, loot, forts.map((f) => ({ x: f.x, z: f.z, active: on && f.alive })), ISLANDS.filter((I) => I.kind === 'port').map((I) => ({ x: I.x, z: I.z, goal: I === goal })));
@@ -1089,14 +1087,14 @@ function hud() {
   $('board-hint').hidden = !bt;
   if (bt) {
     _p.set(bt.x, bt.len * 0.95, bt.z).project(camera);
-    $('board-hint').textContent = bt.hp < 0.2 * bt.maxHp ? 'SPACE · BOARD (AUTO)' : 'SPACE · BOARD';
+    $('board-hint').textContent = `${ui.keyLabel(keys.board)} · BOARD${bt.hp < 0.2 * bt.maxHp ? ' (AUTO)' : ''}`;
     $('board-hint').style.transform = `translate(${Math.round(((_p.x + 1) / 2) * W)}px, ${Math.round(((1 - _p.y) / 2) * H) - 46}px) translateX(-50%)`;
   }
   // refit cards: each pirate picks their own
   const cards = me.cards || [], csig = cards.map((c) => c.id).join();
   if (csig !== cardSig) {
     cardSig = csig;
-    $('cards-list').innerHTML = cards.map((c, i) => `<div class="card"><kbd>${i + 1}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${c.label}</span></div>`).join('');
+    $('cards-list').innerHTML = cards.map((c, i) => `<div class="card"><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${c.label}</span></div>`).join('');
   }
   $('cards').hidden = !cards.length || state.mode === 'dead';
   skillHud();
@@ -1199,8 +1197,8 @@ function skillHud() {
     $('skills').innerHTML = [0, 1, 2, 3].map((i) => {
       const k = me.skills[i];
       return k
-        ? `<div class="slot"><img src="${ICON[k.id]}"><i class="cd"></i><kbd>${i + 1}</kbd><em>${'I'.repeat(k.lvl)}</em><span>${SKILLS[k.id].name}</span></div>`
-        : `<div class="slot locked"><b>?</b><kbd>${i + 1}</kbd><span>locked</span></div>`;
+        ? `<div class="slot"><img src="${ICON[k.id]}"><i class="cd"></i><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><em>${'I'.repeat(k.lvl)}</em><span>${SKILLS[k.id].name}</span></div>`
+        : `<div class="slot locked"><b>?</b><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><span>locked</span></div>`;
     }).join('');
   }
   me.skills.forEach((k, i) => {
@@ -1231,7 +1229,7 @@ function snap() {
 
 // Guests draw one snapshot interval behind: each value glides from where it is drawn now (_a) to the latest snapshot (_b).
 const SK = ['x', 'z', 'h', 'speed', 'turnRate', 'sinkT'], BK = ['x', 'y', 'z'], LK = ['x', 'z', 'life'], KK = ['x', 'z'], JK = ['x', 'z', 't'];
-let snapAt = 0, snapGap = SNAP_DT * 1000, lastBanner = '', lastIn = '', hostGone = false;
+let snapAt = 0, snapGap = SNAP_DT * 1000, lastBanner = '', lastIn = '';
 const byId = new Map(), ballById = new Map(), lootById = new Map(), kegById = new Map(), slamById = new Map();
 function track(o, keys, v, fresh) { o._a = fresh ? v : keys.map((k) => o[k]); o._b = v; }
 function mix(o, keys, a) {
@@ -1258,9 +1256,7 @@ function syncList(list, map, rows, keys, make) {
     list.splice(i, 1);
   }
 }
-// player name: up to 12 letters (digits in a lobby input pick a ship); also cleans what a guest or host sends
-const nick = (v) => String(v ?? '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 12);
-const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const nick = cleanName; // also cleans what a guest or host sends
 function applySnap(m) {
   // glide over the gap the snapshots really arrive at (3 or 4 host frames, more on a slow link), not a fixed 50 ms
   const now = performance.now();
@@ -1298,8 +1294,8 @@ function applySnap(m) {
     const s = ships.find((o) => o.pid === e.pid);
     if (!s) continue;
     // host strings end up in innerHTML (scoreboard, cards, leaderboard): a guest never trusts them
-    Object.assign(e, { tag: nick(e.tag) || 'P' + ((e.pid | 0) + 1), name: esc(e.name), kills: +e.kills || 0,
-      cards: (e.cards || []).map((c) => ({ id: String(c.id), label: esc(c.label) })),
+    Object.assign(e, { tag: nick(e.tag) || 'P' + ((e.pid | 0) + 1), name: ui.esc(e.name), kills: +e.kills || 0,
+      cards: (e.cards || []).map((c) => ({ id: String(c.id), label: ui.esc(c.label) })),
       skills: (e.skills || []).filter((k) => Object.hasOwn(SKILLS, k.id)).slice(0, 4).map((k) => ({ id: k.id, lvl: Math.max(1, Math.min(3, k.lvl | 0)) })),
       cd: e.cd || {}, reload: e.reload || { port: 0, star: 0 } }); // a bad value here would throw in hud() and stop the frame loop
     players.push(Object.assign(s, e));
@@ -1327,6 +1323,8 @@ function applySnap(m) {
   lastBanner = g.banner;
   if (was !== state.mode && state.mode === 'fight') sfx.bell();
   if (was !== state.mode && (state.mode === 'lull' || state.mode === 'over')) sfx.fanfare();
+  if (was !== state.mode && state.mode === 'over') pvpOver();
+  if (was === 'over' && state.mode === 'pvp' && ui.top() === 'pvpover') ui.reset(); // the host started a rematch
   setCombat(state.mode === 'fight' || state.mode === 'pvp');
   // one-shot effects the host recorded; sounds are placed relative to this guest's ship
   for (const [k, ...a] of m.e) {
@@ -1366,81 +1364,173 @@ function guestStep(dt) {
   hud();
 }
 
-const lobbyMsg = (t) => ($('lobby-msg').textContent = t);
-const lobbyLock = (on) => { for (const el of $('lobby').querySelectorAll('button, input')) el.disabled = on; };
-function online() {
-  if (net !== 'solo' || state.mode !== 'select') return false;
-  if (typeof Peer === 'undefined') { lobbyMsg('ONLINE UNAVAILABLE (PeerJS did not load)'); return false; }
-  if (paused) togglePause(); // paused on ship select (alt-tab for the code): online there is no P to clear it
-  document.activeElement?.blur(); // a focused input, once disabled, keeps eating the keys (Firefox)
-  lobbyLock(true);
+// --- online: the hub and the lobby (screens.js `online`, `lobby`), then the run ---------------------------------
+// lobby: { code, quick, mode: 'waves' | 'convoy' | 'pvp', countdown, started, players: [{ pid, name, ship, ready, last }] }.
+// The host owns it and sends it whole ({ t: 'lobby' }) on every change; a guest sends its own line ({ t: 'me', nick, ship, ready, last }).
+// No ship exists before the start: on SET SAIL (or the quick-match clock) the host builds them all, and the run goes on as before.
+// A pirate who joins a private room after the start still gets the lobby: READY drops their ship in.
+let lobby = null, hostGone = false;
+let busy = '', codeErr = ''; // the hub: the button that is waiting on the network, the message under the room code
+const LOBBY_MODES = ['waves', 'convoy', 'pvp'];
+const shipIdx = (v) => ([0, 1, 2].includes(v) ? v : null);
+const lastIdx = () => SHIPS.indexOf(store.lastShip);
+const hub = () => { if (ui.top() === 'online') ui.refresh(); };
+const noPeer = () => typeof Peer === 'undefined' && (ui.toast('error', 'ONLINE UNAVAILABLE · SOLO STILL WORKS'), hub(), true);
+function online(what) {
+  if (net !== 'solo' || state.mode !== 'select' || noPeer()) return false;
+  busy = what;
+  codeErr = '';
+  hub();
   return true;
 }
-function offline(msg) {
+// back to solo, in the hub. msg: why, as a message
+function offline(msg, kind = 'error') {
   room?.close(); // or the abandoned Peer keeps calling back into the next attempt
   for (const s of PREVIEW) if (!ships.includes(s)) ships.push(s); // hostGame took them out of the sim
   clearInterval(quickBeat);
-  net = 'solo'; mode = 'coop'; room = null; myPid = 0; roomOpen = false; quick = quickAt = quickSec = null; quickTries = 0; lobbyLock(false); lobbyMsg(msg);
+  net = 'solo'; mode = 'coop'; room = null; myPid = 0; roomOpen = false; quick = quickAt = null; quickTries = 0; lobby = null; busy = '';
+  ui.clearToasts();
+  if (ui.top() === 'lobby') ui.reset('menu', 'online'); else hub();
+  if (msg) ui.toast(kind, msg, 5000);
 }
-// QUICK CO-OP / QUICK PVP: the server hands out a room code to host or to join (co-op: the GAME button picks the queue)
-function quickGame(m, skip = '', tries = 0) {
-  if (net !== 'solo' || state.mode !== 'select') return;
-  if (typeof Peer === 'undefined') return lobbyMsg('ONLINE UNAVAILABLE (PeerJS did not load)');
-  const q = m === 'pvp' ? 'pvp' : convoy ? 'coop-convoy' : 'coop-waves';
-  lobbyLock(true);
-  lobbyMsg('SEARCHING…');
-  quick = q; // set now: no ship pick while searching (offline() clears it)
+// quick match: the server hands out a room code to host or to join. q: its queue, 'coop-waves' | 'coop-convoy' | 'pvp'
+function quickGame(q, skip = '', tries = 0) {
+  if (net !== 'solo' || state.mode !== 'select' || noPeer()) return;
+  quick = q; // offline() clears it: an answer that comes back after the player gave up is dropped
+  busy = 'q-' + q;
+  ui.toast('wait', 'SEARCHING…', 0);
+  hub();
   match(q, skip && `&skip=${skip}`).catch(() => null).then((r) => { // only the lookup is caught: a bug in hostGame / joinGame must reach the console
-    if (r?.retry) return setTimeout(() => quickGame(m, '', tries), 1000); // a room is opening: join it once its host is reachable
+    if (quick !== q || net !== 'solo') return;
+    if (r?.retry) return setTimeout(() => quick === q && net === 'solo' && quickGame(q, '', tries), 1000); // a room is opening: join it once its host is reachable
     const code = r?.host || r?.join;
     if (!/^[A-Z]{4}$/.test(code)) return offline('MATCHMAKING UNREACHABLE'); // no answer, an old service build, or not our service: the code reaches innerHTML
-    lobbyLock(false); // online() locks it again
     quickTries = tries;
-    if (r.host) hostGame(m, code); else joinGame(code);
+    if (r.host) hostGame(q === 'pvp' ? 'pvp' : q.slice(5), code); else joinGame(code);
   });
 }
 // a quick room that could not be hosted or joined: ask again, telling the server to drop that one
 function retryQuick(skip) {
-  const m = quick === 'pvp' ? 'pvp' : 'coop', n = quickTries + 1; // not mode: a guest only learns it from the host's 'hi'
-  offline(n < 3 ? 'SEARCHING…' : 'NO MATCH FOUND, TRY AGAIN');
-  if (n < 3) quickGame(m, skip, n);
+  const q = quick, n = quickTries + 1;
+  offline(n < 3 ? '' : 'NO MATCH FOUND · TRY AGAIN', 'warn');
+  if (n < 3) quickGame(q, skip, n);
 }
-// the lobby's GAME button: waves or convoy, for solo and HOST CO-OP (a guest gets the host's choice in 'hi')
+// waves or convoy: each has its map
 function setConvoy(on) {
   if (convoy !== on) loadMap(on ? 'convoy' : 'waves');
   convoy = on;
-  $('gm').textContent = on ? 'GAME: CONVOY' : 'GAME: WAVES';
 }
+// the lobby's mode (the host's choice; a guest applies the host's)
+function setLobbyMode(m) {
+  mode = m === 'pvp' ? 'pvp' : 'coop';
+  setConvoy(m === 'convoy');
+  if (!lobby || lobby.mode === m) return;
+  lobby.mode = m;
+  lobbySync();
+}
+function lobbySync() {
+  if (net === 'host') room.broadcast({ t: 'lobby', ...lobby });
+  if (ui.top() === 'lobby') ui.refresh();
+}
+const myLine = () => lobby?.players.find((p) => p.pid === myPid);
+const sendMe = () => { const p = myLine(); room.send({ t: 'me', nick: store.name, ship: p?.ship ?? null, ready: !!p?.ready, last: lastIdx() }); };
+// this browser's ship in the lobby. The host has no READY button: a ship picked is a ship ready
+function lobbyPick(i) {
+  const p = myLine();
+  if (!p || (lobby.started && p.ready)) return;
+  p.ship = i;
+  if (net === 'host') { p.ready = true; lobbySync(); } else { sendMe(); ui.refresh(); }
+}
+function lobbyReady() {
+  const p = myLine();
+  if (!p || net !== 'guest' || (lobby.started && p.ready)) return;
+  p.ready = !p.ready;
+  p.ship ??= lastIdx(); // READY with no ship picked: the last one sailed
+  sendMe();
+  ui.refresh();
+}
+// host: every pirate gets a ship (the last one they sailed if they picked none), then the run starts
+function lobbyStart() {
+  if (net !== 'host' || !roomOpen || !lobby || lobby.started) return;
+  lobby.started = true;
+  lobby.countdown = null;
+  for (const p of lobby.players) {
+    p.ship ??= p.last;
+    p.ready = true;
+    if (p.pid === 0) choosePlayer(p.ship); else addPlayer(p.pid, p.ship, p.name);
+  }
+  ui.reset();
+  lobbySync();
+  sail();
+}
+// host: a guest's line. Guest input is untrusted: clamp it
+function lobbyMe(pid, m) {
+  let p = lobby.players.find((o) => o.pid === pid);
+  if (p && lobby.started && p.ready) return; // at sea: a ship is not changed
+  if (!p) { lobby.players.push(p = { pid }); lobby.players.sort((a, b) => a.pid - b.pid); }
+  const ship = shipIdx(m.ship);
+  Object.assign(p, { name: nick(m.nick) || 'P' + (pid + 1), ship, ready: !!m.ready && ship !== null, last: shipIdx(m.last) ?? 1 });
+  if (lobby.started && p.ready) { addPlayer(pid, ship, p.name); p.ready = players.some((o) => o.pid === pid); } // a run under way: the ship drops in (not into a run that is over)
+  lobbySync();
+}
+// guest: the host's lobby. Host strings end up in innerHTML: a guest never trusts them
+function onLobby(m) {
+  const was = lobby;
+  const list = (Array.isArray(m.players) ? m.players : []).slice(0, MAX_PLAYERS).map((p) => ({ pid: p?.pid | 0, name: nick(p?.name) || 'P' + ((p?.pid | 0) + 1), ship: shipIdx(p?.ship), ready: !!p?.ready }));
+  lobby = { code: /^[A-Z]{4}$/.test(m.code) ? m.code : '', quick: !!m.quick, mode: LOBBY_MODES.includes(m.mode) ? m.mode : 'waves', countdown: Number.isFinite(m.countdown) ? m.countdown | 0 : null, started: !!m.started, players: list };
+  for (const p of was?.players || []) if (!list.some((o) => o.pid === p.pid)) ui.toast('warn', `${p.name} LEFT`);
+  if (guestShip !== null) return; // at sea already
+  setLobbyMode(lobby.mode);
+  const p = myLine();
+  if (lobby.started && p?.ready && p.ship !== null) { // the host built our ship: snapshots bring it
+    guestShip = p.ship;
+    store.lastShip = SHIPS[p.ship];
+    me = null;
+    hideSelect();
+    return ui.reset();
+  }
+  if (was) return void (ui.top() === 'lobby' && ui.refresh());
+  busy = '';
+  ui.clearToasts();
+  ui.reset('menu', 'online', 'lobby');
+  ui.toast('ok', `JOINED ${lobby.mode === 'pvp' ? 'PVP' : 'CO-OP'} · PICK YOUR SHIP`);
+}
+// m: the lobby's mode at first (the host changes it inside a private room). code: a quick-match room's, handed out by the server
 function hostGame(m, code) {
-  if (!online()) return;
+  if (!online(quick ? 'q-' + quick : 'create')) return;
   net = 'host';
   hostTicker();
-  mode = m;
-  if (m === 'pvp') setConvoy(false);
-  for (const s of PREVIEW) if (ships.includes(s)) ships.splice(ships.indexOf(s), 1); // still on screen, but no target for guests until one is picked
-  lobbyMsg('OPENING ROOM…');
+  setLobbyMode(m);
+  for (const s of PREVIEW) if (ships.includes(s)) ships.splice(ships.indexOf(s), 1); // still on screen, but out of the sim until the start
+  ui.toast('wait', 'OPENING ROOM…', 0);
   room = hostRoom({
     open: (code) => {
       roomOpen = true;
-      if (!quick) return lobbyMsg(`ROOM ${code} · give friends the code`);
-      lobbyMsg(`QUICK ${modeName()} · waiting for pirates`);
-      clearInterval(quickBeat); // 'open' fires again after a signalling reconnect
+      if (!lobby) { // 'open' fires again after a signalling reconnect
+        lobby = { code, quick: !!quick, mode: m, countdown: null, started: false, players: [{ pid: 0, name: store.name, ship: null, ready: false, last: lastIdx() }] };
+        busy = '';
+        ui.clearToasts();
+        ui.reset('menu', 'online', 'lobby');
+      }
+      if (!quick) return;
+      clearInterval(quickBeat);
       quickBeat = setInterval(quickBeatNow, 10000);
       quickBeatNow();
     },
     join: (pid) => {
-      room.send(pid, { t: 'hi', pid, mode, convoy });
+      room.send(pid, { t: 'hi', pid });
       if (document.hidden) { document.title = 'A PIRATE JOINED · COME BACK'; sfx.bell(); } // the game goes on without its host's eyes (hostTicker), but not without its ship
     },
     msg: (pid, msg) => {
-      if (msg.t === 'ship') return addPlayer(pid, msg.i | 0, msg.nick);
+      if (msg.t === 'me') return lobbyMe(pid, msg);
       const p = players.find((o) => o.pid === pid);
       if (p) act(p, msg);
     },
     leave: (pid) => {
+      const l = lobby.players.find((o) => o.pid === pid);
+      if (l) { lobby.players.splice(lobby.players.indexOf(l), 1); ui.toast('warn', `${l.name} LEFT`); lobbySync(); } // guests read it off the lobby
       const p = players.find((o) => o.pid === pid);
       if (!p) return;
-      banner(`${p.tag} LEFT`, 2);
       players.splice(players.indexOf(p), 1);
       Object.assign(p, { wrecked: true, isPlayer: false, pid: null }); // their ship goes down and is cleared like any wreck
       damage(p, 1e9);
@@ -1448,49 +1538,113 @@ function hostGame(m, code) {
     error: (e) => {
       if (roomOpen) return;
       if (quick && e.type === 'unavailable-id') return retryQuick(code); // the code is someone's private room
-      offline(`COULD NOT OPEN A ROOM (${e.type})`);
+      offline('COULD NOT OPEN A ROOM');
     },
   }, code);
 }
-function joinGame(code = $('code').value.trim().toUpperCase()) {
-  if (!/^[A-Z]{4}$/.test(code)) return lobbyMsg('ENTER THE 4-LETTER ROOM CODE');
-  if (!online()) return;
+function joinGame(code) {
+  if (!/^[A-Z]{4}$/.test(code)) { codeErr = 'ENTER THE 4-LETTER ROOM CODE.'; return hub(); }
+  if (!online(quick ? 'q-' + quick : 'join')) return;
   net = 'guest';
-  lobbyMsg('CONNECTING…');
+  hostGone = false;
+  ui.toast('wait', 'CONNECTING…', 0);
   room = joinRoom(code, {
     open: () => {},
     msg: (m) => {
-      if (m.t === 'hi') { myPid = m.pid; mode = m.mode; setConvoy(!!m.convoy); lobbyMsg(`JOINED ${modeName()} · pick your ship: 1, 2 or 3`); }
+      if (m.t === 'hi') { myPid = m.pid | 0; room.send({ t: 'me', nick: store.name, ship: null, ready: false, last: lastIdx() }); }
+      else if (m.t === 'lobby') { if (myPid) onLobby(m); }
       else if (m.s && guestShip !== null) applySnap(m);
-      else if (m.s) lobbyMsg(`${/^SETTING SAIL/.test(m.g?.banner) ? m.g.banner : `JOINED ${modeName()}`} · pick your ship: 1, 2 or 3`); // no ship yet: still see the quick-match clock (textContent)
     },
     close: () => {
       if (!myPid) return quick ? retryQuick(code) : offline('ROOM FULL, CLOSED OR UNREACHABLE');
       hostGone = true;
-      banner('HOST LEFT', 3);
-      if (state.mode === 'dead') { state.t = Math.max(state.t, 3.1); return; } // run over: let the guest sign the leaderboard and reload themselves
-      setTimeout(() => location.reload(), 3000);
+      if (guestShip === null) { // in the lobby
+        const cap = lobby?.players[0]?.name || 'THE CAPTAIN';
+        offline();
+        ui.modal({ title: 'HOST LEFT', text: `${cap} LEFT THE ROOM. THE CREW IS DISBANDED.`, buttons: [{ label: 'FIND A NEW CREW', cancel: true }, { label: 'MAIN MENU', run: () => ui.reset('menu') }] });
+        return;
+      }
+      if (state.mode === 'dead') { state.t = Math.max(state.t, 3.1); return; } // run over: the end screen stays, the run is signed
+      ui.toast('error', 'HOST LEFT', 3000);
+      setTimeout(() => reboot('online'), 3000);
     },
     error: (e) => {
       if (myPid) return;
       if (quick) return retryQuick(code);
-      offline(e.type === 'peer-unavailable' ? 'ROOM NOT FOUND' : `CONNECTION FAILED (${e.type})`);
+      offline();
+      if (e.type === 'peer-unavailable') { codeErr = 'ROOM NOT FOUND. CHECK THE CODE WITH YOUR CAPTAIN.'; return hub(); }
+      ui.modal({ title: 'CONNECTION FAILED', text: 'THE ROOM CAN NOT BE REACHED.', buttons: [{ label: 'RETRY', run: () => joinGame(code) }, { label: 'MAIN MENU', cancel: true, run: () => ui.reset('menu') }] });
     },
   });
 }
-try { $('nick').value = nick(localStorage.getItem('gallion-nick')); } catch {}
-$('nick').oninput = (e) => { e.target.value = nick(e.target.value); try { localStorage.setItem('gallion-nick', e.target.value); } catch {} };
-$('gm').onclick = (e) => { e.currentTarget.blur(); setConvoy(!convoy); };
-$('host-coop').onclick = (e) => { e.currentTarget.blur(); hostGame('coop'); };
-$('host-pvp').onclick = (e) => { e.currentTarget.blur(); hostGame('pvp'); };
-$('join').onclick = (e) => { e.currentTarget.blur(); joinGame(); };
-$('quick-coop').onclick = (e) => { e.currentTarget.blur(); quickGame('coop'); };
-$('quick-pvp').onclick = (e) => { e.currentTarget.blur(); quickGame('pvp'); };
+// PvP: the match is over (host: decided here; guest: read off a snapshot). The host can start another
+function pvpOver() {
+  if (!me) return;
+  held.clear();
+  const rows = [...players].sort((a, b) => b.kills - a.kills).map((p) => ({ name: p.tag, ship: String(p.name).toUpperCase(), kills: p.kills, you: p === me }));
+  ui.open('pvpover', { rows, won: rows[0].you, host: net === 'host', captain: lobby?.players[0]?.name || 'THE CAPTAIN' });
+}
+// a ship's picture for the lobby's seats: the scene drawn small with her alone, once
+const thumbs = [];
+function thumb(i) {
+  const s = PREVIEW[i];
+  if (thumbs[i] || !s.mesh.root.parent) return thumbs[i] || '';
+  const keep = [viewH, ...PREVIEW.map((p) => p.mesh.root.visible)];
+  PREVIEW.forEach((p) => (p.mesh.root.visible = p === s));
+  [iw, ih, viewH] = [100, 70, 16];
+  post.setSize(iw, ih);
+  setProjection();
+  camera.position.set(s.x, 3, s.z).addScaledVector(camDir, 200);
+  post.render(scene, camera);
+  thumbs[i] = canvas.toDataURL();
+  PREVIEW.forEach((p, k) => (p.mesh.root.visible = keep[k + 1]));
+  viewH = keep[0];
+  resize(); // the real size again; the next frame redraws it
+  return thumbs[i];
+}
 
+// --- menus (ui.js, screens.js): what the game lends them -----------------------------
+initScreens({
+  ships: PREVIEW.map((s, i) => ({ name: s.name.toUpperCase(), blurb: PLAYER_SHIPS[i].blurb.toUpperCase(),
+    gauges: shipStats(s).map(([, v]) => Math.round(v * 10)), skills: s.skills.map((k) => ({ name: SKILLS[k.id].name.toUpperCase(), icon: ICON[k.id] })) })),
+  unlock, setAudio, rekey,
+  keys: () => keys,
+  muteLabel: () => ui.keyLabel(keys.mute),
+  testFx: () => sfx.boom(1, 0),
+  pauseAudio: (on) => paused && setPaused(on), // settings opened from the pause: sound is back while it is open
+  setMode: (m) => setConvoy(m === 'convoy'), // its map shows behind the ship screen
+  // online: the hub's state, its three ways in, and the lobby
+  hub: () => ({ off: typeof Peer === 'undefined', busy, err: codeErr }),
+  quick: quickGame, create: () => hostGame(store.lastMode), join: joinGame, leave: () => offline(),
+  lobby: () => lobby && { ...lobby, me: myPid, host: net === 'host' },
+  lobbyMode: (m) => net === 'host' && !lobby.quick && !lobby.started && setLobbyMode(m),
+  lobbyPick, lobbyReady, lobbyStart, thumb,
+  rematch() { ui.reset(); sail(); },
+  startSolo,
+  resume, reboot,
+  // a world board's rows. A service from before names has one board per game, crews and solo runs mixed, in the old shape
+  world: (b) => worldScores(b).catch((e) => (b.endsWith('-crew') ? worldScores(b.replace('-crew', '')) : Promise.reject(e)))
+    .then((r) => r.top.map(normRow).filter((row) => row && (row.crew.length > 1) === b.endsWith('-crew'))),
+  pauseKeys: () => [ui.keyLabel(keys.pause), 'ESC'],
+  isPause: (code) => actionAt(code) === 'pause',
+});
+function startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); }
+ui.setOnChange(() => { document.body.classList.toggle('menus', ui.active()); rekey(); }); // rekey: labels follow the keyboard layout once the browser tells it
+ui.setOnKey((e) => { if (actionFor(e) === 'mute') toggleMute(); }); // the mute key works on every screen
+setAudio(store.audio);
+rekey();
+// broadside.boot: a reload asked for by the menus (a run starts from a fresh page) says where to land
+let boot = null;
+try { boot = sessionStorage.getItem('broadside.boot'); sessionStorage.removeItem('broadside.boot'); } catch {}
+if (!store.name || !boot) ui.open('title');
+else if (boot === 'sail') startSolo(store.lastMode, SHIPS.indexOf(store.lastShip)); // SAIL AGAIN: same mode, same ship
+else if (boot === 'ship') ui.reset('menu', 'solo-mode', 'ship');
+else if (boot === 'online') ui.reset('menu', 'online');
+else ui.reset('menu');
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
 window.__game = {
-  get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: loadScores, zoom: () => (overview = !overview), camera,
+  ui, get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: () => store.best, zoom: () => (overview = !overview), camera,
   killWave: () => (state.queue = []) && ships.filter((o) => o.team === 1).forEach((o) => damage(o, 1e9)),
   startWave,
   advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); post.render(scene, camera); },

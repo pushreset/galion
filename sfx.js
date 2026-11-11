@@ -1,16 +1,25 @@
 // Procedural WebAudio sounds: no asset files, everything is shaped noise + oscillators.
 // Browsers keep audio locked until a user gesture, so game.js calls unlock() on keydown;
 // until then every sound is a silent no-op (also keeps headless QA quiet).
-let ac = null, out = null, noiseBuf = null, muted = false;
-const VOL = 0.7;
+// Three gains: master → destination, with the music and the effects (sea ambience included) each on their own bus under it.
+let ac = null, master = null, musicBus = null, fxBus = null, noiseBuf = null;
+let vol = { master: 8, music: 6, fx: 9, muted: false }; // notches 0-10 (settings screen); muted keeps them
+export function setAudio(a) {
+  vol = a;
+  if (!ac) return;
+  master.gain.value = a.muted ? 0 : a.master / 10;
+  musicBus.gain.value = a.music / 10;
+  fxBus.gain.value = a.fx / 10;
+}
 
 export function unlock() {
   if (ac) return void ac.resume();
   ac = new AudioContext();
-  out = ac.createGain();
-  out.gain.value = muted ? 0 : VOL;
+  master = ac.createGain(); musicBus = ac.createGain(); fxBus = ac.createGain();
   const comp = ac.createDynamicsCompressor(); // 6-gun volleys stack up; keep them from clipping
-  out.connect(comp).connect(ac.destination);
+  musicBus.connect(master); fxBus.connect(master);
+  master.connect(comp).connect(ac.destination);
+  setAudio(vol);
   noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
   const d = noiseBuf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -19,7 +28,7 @@ export function unlock() {
   lp.type = 'lowpass'; lp.frequency.value = 420;
   g.gain.value = 0.07; depth.gain.value = 0.04; lfo.frequency.value = 0.12;
   lfo.connect(depth).connect(g.gain);
-  sea.connect(lp).connect(g).connect(out);
+  sea.connect(lp).connect(g).connect(fxBus);
   sea.start(); lfo.start();
   nextT = ac.currentTime + 0.2;
   setInterval(music, 100);
@@ -36,50 +45,45 @@ function music() {
   if (nextT < ac.currentTime) nextT = ac.currentTime; // throttled background timer: skip, don't burst
   while (nextT < ac.currentTime + 0.3) {
     const delay = nextT - ac.currentTime, i = stepN % 32;
-    if (MELODY[i]) tone(0.05, 0, { wave: 'square', f: mid(MELODY[i]), dur: STEP * 0.9, delay });
-    if (i % 4 === 0) tone(0.16, 0, { wave: 'triangle', f: mid(ROOTS[i >> 3] + (i % 8 ? 7 : 0)), dur: STEP * 3.5, delay }); // root, then fifth
-    if (combat && i % 2 === 0) noise(i % 4 ? 0.12 : 0.3, 0, { f: 180, f1: 50, dur: 0.18, delay }); // war drum in fights only
+    if (MELODY[i]) tone(0.05, 0, { wave: 'square', f: mid(MELODY[i]), dur: STEP * 0.9, delay, bus: musicBus });
+    if (i % 4 === 0) tone(0.16, 0, { wave: 'triangle', f: mid(ROOTS[i >> 3] + (i % 8 ? 7 : 0)), dur: STEP * 3.5, delay, bus: musicBus }); // root, then fifth
+    if (combat && i % 2 === 0) noise(i % 4 ? 0.12 : 0.3, 0, { f: 180, f1: 50, dur: 0.18, delay, bus: musicBus }); // war drum in fights only
     nextT += STEP;
     stepN++;
   }
 }
 export const setPaused = (p) => ac && (p ? ac.suspend() : ac.resume());
-export function toggleMute() {
-  muted = !muted;
-  if (out) out.gain.value = muted ? 0 : VOL;
-  return muted;
-}
 
 function src() {
   const s = ac.createBufferSource();
   s.buffer = noiseBuf; s.loop = true;
   return s;
 }
-// chain: source → filter → gain envelope → panner → out
-function voice(node, vol, pan, t, attack, dur) {
+// chain: source → filter → gain envelope → panner → bus
+function voice(node, vol, pan, t, attack, dur, bus) {
   const g = ac.createGain(), p = ac.createStereoPanner();
   p.pan.value = Math.max(-1, Math.min(1, pan));
   g.gain.setValueAtTime(0.0001, t);
   g.gain.exponentialRampToValueAtTime(vol, t + attack);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  node.connect(g).connect(p).connect(out);
+  node.connect(g).connect(p).connect(bus);
 }
-function noise(vol, pan, { type = 'lowpass', f = 1000, f1 = f, q = 0.7, attack = 0.005, dur = 0.4, delay = 0 }) {
+function noise(vol, pan, { type = 'lowpass', f = 1000, f1 = f, q = 0.7, attack = 0.005, dur = 0.4, delay = 0, bus = fxBus }) {
   const t = ac.currentTime + delay, s = src(), flt = ac.createBiquadFilter();
   flt.type = type; flt.Q.value = q;
   flt.frequency.setValueAtTime(f, t);
   flt.frequency.exponentialRampToValueAtTime(f1, t + dur);
   s.connect(flt);
-  voice(flt, vol, pan, t, attack, dur);
+  voice(flt, vol, pan, t, attack, dur, bus);
   s.start(t, Math.random() * 1.5);
   s.stop(t + dur + 0.05);
 }
-function tone(vol, pan, { wave = 'sine', f = 440, f1 = f, attack = 0.005, dur = 0.3, delay = 0 }) {
+function tone(vol, pan, { wave = 'sine', f = 440, f1 = f, attack = 0.005, dur = 0.3, delay = 0, bus = fxBus }) {
   const t = ac.currentTime + delay, o = ac.createOscillator();
   o.type = wave;
   o.frequency.setValueAtTime(f, t);
   o.frequency.exponentialRampToValueAtTime(f1, t + dur);
-  voice(o, vol, pan, t, attack, dur);
+  voice(o, vol, pan, t, attack, dur, bus);
   o.start(t);
   o.stop(t + dur + 0.05);
 }

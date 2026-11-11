@@ -2,7 +2,7 @@
 // Same needs as qa/e2e.mjs: `python3 -m http.server 8765` in this repo, network access (PeerJS signalling), playwright-core.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -14,6 +14,7 @@ const URL = process.env.URL || 'http://127.0.0.1:8765/', PORT = 3123;
 const src = readFileSync(new globalThis.URL('../coturn-compose.txt', import.meta.url), 'utf8')
   .split('content: |\n')[1].replace(/^ {10}/gm, '').replace('listen(3000)', `listen(${PORT})`);
 const DATA = mkdtempSync(join(tmpdir(), 'galion-')), SCORES = join(DATA, 'scores.json'); // the leaderboard's file, /data/scores.json in the stack
+writeFileSync(SCORES, JSON.stringify({ waves: [], convoy: [{ ini: 'ZOE', wave: 7, gold: 1350, combo: 5, ship: 'Wasp', date: 1 }, { ini: 'AAA+BBB', wave: 9, gold: 10, combo: 2, ship: 'Wasp+Corsair+Leviathan', date: 2 }] })); // a board from before names
 const ice = spawn(process.execPath, ['--input-type=module', '-'], { env: { ...process.env, ORIGIN: new globalThis.URL(URL).origin, TURN_SECRET: 'x', TURN_HOST: 'x', SCORES }, stdio: ['pipe', 'inherit', 'inherit'] });
 ice.stdin.end(src);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -25,11 +26,13 @@ async function open(name) {
   const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_|CORS/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
+  await page.addInitScript((captain) => { localStorage.setItem('broadside.name', JSON.stringify(captain)); sessionStorage.setItem('broadside.boot', 'online'); }, name.split(' ')[1].toUpperCase()); // straight to the online hub, named HOST or GUEST
   await page.goto(`${URL}?ice=http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
   return page;
 }
-const lobby = (page, re) => page.waitForFunction((s) => new RegExp(s).test(document.getElementById('lobby-msg').textContent), re.source, { timeout: 30000 });
+// the lobby screen is open and its text matches
+const lobby = (page, re) => page.waitForFunction((s) => __game.ui.top() === 'lobby' && new RegExp(s).test(document.getElementById('ui-screen').textContent.replace(/\s+/g, ' ')), re.source, { timeout: 30000 });
 
 try {
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--ignore-gpu-blocklist', '--use-angle=metal'] });
@@ -51,38 +54,45 @@ try {
     await sleep(10200); // B never opens (its host left): A, still waiting, takes the slot back with its heartbeat
     await m(`&code=${A}&free=3`);
     assert.deepEqual(await m(), { join: A }, 'a waiting host is relisted over a dead room');
-    // the world leaderboard: bounds, one row per crew, a top 100, kept on disk
+    // the world leaderboard: bounds, solo runs and crews apart, one row per crew, a top 100, kept on disk
     const post = async (run, ip = '10.1.0.1', b = 'waves', origin = new globalThis.URL(URL).origin) => {
       const r = await fetch(`http://127.0.0.1:${PORT}/scores?b=${b}`, { method: 'POST', body: typeof run === 'string' ? run : JSON.stringify(run), headers: { Origin: origin, 'X-Forwarded-For': ip } });
       return r.status === 200 ? r.json() : r.status;
     };
-    const run = { ini: 'AAA', wave: 5, gold: 120, combo: 3, ship: 'Wasp+Corsair' };
+    const names = (r) => r.crew.map((c) => `${c.name}:${c.ship}`).join();
+    // the file the service started on is from before names (written above): its rows moved to the new boards
+    assert.deepEqual((await get('scores?b=convoy')).top.map(names), ['ZOE:wasp'], 'an old solo row keeps its initials as a name');
+    assert.deepEqual((await get('scores?b=convoy-crew')).top.map(names), ['AAA:wasp,BBB:corsair,PIRATE:leviathan'], 'an old crew row moves to the crew board, a pirate who never signed is PIRATE');
+    const anne = { name: 'ANNE', ship: 'wasp' }, run = { crew: [anne, { name: 'BLACKBEARD', ship: 'corsair' }], wave: 5, gold: 120, combo: 3 };
     assert.equal(await post(run, undefined, undefined, 'https://evil.example'), 403, 'another origin does not sign');
     assert.equal(await post(run, undefined, 'pvp'), 400, 'no such board');
-    for (const bad of [{ ...run, ini: '<b>' }, { ...run, ini: ['AAA'] }, { ...run, wave: 0 }, { ...run, gold: 1.5 }, { ...run, ship: 'Wasp<i>' }, '{', 'null'])
-      assert.equal(await post(bad), 400, `refused: ${JSON.stringify(bad)}`);
-    assert.deepEqual(await get('scores?b=waves'), { top: [], rank: -1 }, 'bad runs leave the board empty');
+    for (const bad of [{ ...run, crew: [] }, { ...run, crew: Array(5).fill(anne) }, { ...run, crew: [{ name: '<b>', ship: 'wasp' }] }, { ...run, crew: [{ name: 'anne', ship: 'wasp' }] }, { ...run, crew: [{ name: 'TOOLONGANAMEX', ship: 'wasp' }] },
+      { ...run, crew: [{ name: ['ANNE'], ship: 'wasp' }] }, { ...run, crew: [{ name: 'ANNE', ship: 'yacht' }] }, { ...run, crew: 'ANNE' }, { ...run, wave: 0 }, { ...run, gold: 1.5 }, '{', 'null'])
+      assert.equal(await post(bad, '10.1.0.9'), 400, `refused: ${JSON.stringify(bad)}`);
+    assert.deepEqual([(await get('scores?b=waves')).top, (await get('scores?b=waves-crew')).top], [[], []], 'bad runs leave the boards empty');
     assert.equal((await post(run)).rank, 0);
-    await post({ ...run, ini: 'BBB', combo: 4 });
-    const crew = await post({ ...run, ini: 'BBB' }); // signing twice adds nothing
-    assert.deepEqual([crew.top.length, crew.top[0].ini, crew.top[0].combo, crew.rank], [1, 'AAA+BBB', 4, 0], 'a crew shares one row');
-    for (let i = 0; i < 100; i++) await post({ ...run, ini: 'CCC', wave: 6, gold: i }, `10.2.0.${i}`);
+    const crew = await post({ ...run, combo: 4 }, '10.1.0.2', 'waves-crew'); // the second browser of the crew signs the same run
+    assert.deepEqual([crew.top.length, names(crew.top[0]), crew.top[0].combo, crew.rank], [1, 'ANNE:wasp,BLACKBEARD:corsair', 4, 0], 'a crew shares one row');
+    assert.equal((await get('scores?b=waves')).top.length, 0, 'a crew is ranked apart from solo runs, whatever board it was posted to');
+    assert.equal(names((await post({ ...run, crew: [{ name: 'XXFUCKXX', ship: 'wasp' }] }, '10.1.0.3')).top[0]), 'PIRATE:wasp', 'a banned name is signed PIRATE');
+    assert.equal(names((await post({ ini: 'OLD', wave: 6, gold: 1, combo: 0, ship: 'Leviathan' }, '10.1.0.4')).top[0]), 'OLD:leviathan', 'a tab from before names still signs');
+    const solo = { ...run, crew: [anne] };
+    for (let i = 0; i < 100; i++) await post({ ...solo, wave: 7, gold: i }, `10.2.0.${i}`);
     const { top } = await get('scores?b=waves');
-    assert.deepEqual([top.length, top[0].gold, top[99].gold, top.some((r) => r.wave === 5)], [100, 99, 0, false], 'a top 100, best first: the weakest run fell off');
-    assert.equal((await post({ ...run, wave: 1 }, '10.3.0.1')).rank, -1, 'a run below the hundredth is not listed');
-    assert.equal((await get('scores?b=convoy')).top.length, 0, 'one board per game');
-    assert.equal(JSON.parse(readFileSync(SCORES, 'utf8')).waves.length, 100, 'the board is on disk');
-    const solo = { ...run, ship: 'Wasp' };
+    assert.deepEqual([top.length, top[0].gold, top[99].gold, top.some((r) => r.wave < 7)], [100, 99, 0, false], 'a top 100, best first: the weakest runs fell off');
+    assert.equal((await post({ ...solo, wave: 1 }, '10.3.0.1')).rank, -1, 'a run below the hundredth is not listed');
+    const disk = JSON.parse(readFileSync(SCORES, 'utf8'));
+    assert.deepEqual([Object.keys(disk), disk.waves.length, disk['waves-crew'].length], [['waves', 'convoy', 'waves-crew', 'convoy-crew'], 100, 1], 'the boards are on disk');
     await post(solo, '10.5.0.1', 'convoy');
-    assert.equal((await post({ ...solo, ini: 'BBB' }, '10.5.0.1', 'convoy')).top.length, 2, 'two solo runs with the same score keep their own rows');
+    assert.equal((await post(solo, '10.5.0.1', 'convoy')).top.length, 3, 'two solo runs with the same score keep their own rows');
     assert.equal(await last(13, () => post(run, '10.4.0.1', 'convoy')), 429, 'signing is rate limited per address');
     assert.equal(await post(run, '6.6.6.6, 10.4.0.1', 'convoy'), 429, 'an address the client made up in X-Forwarded-For does not get a new limit');
   }
-  // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host gets a ship)
+  // 1. PvP: the first player hosts, the second joins the same room, the match starts on its own (the idle host sails its last ship)
   {
     const H = await open('pvp host'), G = await open('pvp guest');
-    await H.click('#quick-pvp');
-    await lobby(H, /QUICK PVP · waiting/);
+    await H.click('[data-f=q-pvp]');
+    await lobby(H, /QUICK MATCH PVP · ROOM [A-Z]{4} · 1\/4 PIRATES.*WAITING FOR PIRATES…/);
     // the host looks at another tab while it waits: it stays listed, is called back when the guest arrives, and its game goes on
     // without frames (like a real hidden tab: rAF is held back until the tab is shown again)
     const vis = (hidden) => H.evaluate((h) => {
@@ -92,33 +102,34 @@ try {
       document.dispatchEvent(new Event('visibilitychange'));
     }, hidden);
     await vis(true);
-    await G.click('#quick-pvp');
-    await lobby(G, /pick your ship/); // not JOINED PVP: the countdown started when G connected, and a guest without a ship reads it there
+    await G.click('[data-f=q-pvp]');
+    await lobby(G, /SETTING SAIL IN \d+/); // the hidden host counts down, and the guest reads its clock in the lobby
     assert.equal(await H.title(), 'A PIRATE JOINED · COME BACK');
-    await G.evaluate(() => __game.choose(0));
-    await G.waitForFunction(() => /SETTING SAIL IN/.test(document.getElementById('banner').textContent), null, { timeout: 10000 }); // the hidden host counts down
+    await G.keyboard.press('Digit1');
+    await lobby(G, /GUESTWASP/);
     assert.ok(await G.evaluate(async () => { // the guest's countdown must not blink between two seconds
-      for (let i = 0; i < 15; i++) { if (document.getElementById('banner').hidden) return false; await new Promise((r) => setTimeout(r, 100)); }
+      for (let i = 0; i < 15; i++) { if (!/SETTING SAIL IN\s*\d+/.test(document.getElementById('ui-screen').textContent)) return false; await new Promise((r) => setTimeout(r, 100)); }
       return true;
     }), 'the countdown stays on screen on the guest');
     await vis(false);
     assert.equal(await H.title(), 'Broadside');
     await H.waitForFunction(() => __game.state.mode === 'pvp', null, { timeout: 25000 });
-    assert.equal(await H.evaluate(() => __game.players.length), 2, 'host and guest both sail');
+    assert.deepEqual(await H.evaluate(() => __game.players.map((p) => `${p.tag}:${p.name}`)), ['HOST:Corsair', 'GUEST:Wasp'], 'host (its last ship) and guest (the one picked) both sail');
+    await G.waitForFunction(() => __game.player && !__game.ui.top(), null, { timeout: 10000 });
     await Promise.all([H.close(), G.close()]);
   }
-  // 2. co-op convoy: its own queue, the host picks a ship, wave 1 sets sail without Enter
+  // 2. co-op convoy: its own queue, each pirate picks a ship in the lobby, wave 1 sets sail when the clock runs out
   {
     const H = await open('coop host'), G = await open('coop guest');
-    for (const p of [H, G]) await p.click('#gm'); // GAME: CONVOY
-    await H.click('#quick-coop');
-    await lobby(H, /QUICK CONVOY · waiting/);
-    await H.evaluate(() => __game.choose(1));
-    await G.click('#quick-coop');
-    await lobby(G, /pick your ship/);
-    await G.evaluate(() => __game.choose(2));
-    await H.waitForFunction(() => __game.state.wave === 1, null, { timeout: 30000 });
-    assert.equal(await H.evaluate(() => __game.players.length), 2, 'both pirates in the convoy run');
+    await H.click('[data-f=q-coop-convoy]');
+    await lobby(H, /QUICK MATCH CONVOY · ROOM/);
+    await H.keyboard.press('Digit2');
+    await G.click('[data-f=q-coop-convoy]');
+    await lobby(G, /QUICK MATCH CONVOY · ROOM [A-Z]{4} · 2\/4 PIRATES/);
+    await G.keyboard.press('Digit3');
+    await G.click('[data-f=ready]');
+    await H.waitForFunction(() => __game.state.wave === 1, null, { timeout: 40000 });
+    assert.deepEqual(await H.evaluate(() => __game.players.map((p) => p.name)), ['Corsair', 'Leviathan'], 'both pirates in the convoy run');
   }
   assert.deepEqual(errors, [], 'page errors');
   console.log('quick match ok');

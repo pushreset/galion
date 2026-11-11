@@ -6,7 +6,8 @@
 <title>Broadside</title>
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Silkscreen&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<link href="broadside-ui.css" rel="stylesheet">
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0c2140; }
   #c { display: block; image-rendering: pixelated; }
@@ -23,24 +24,17 @@
   #combo { color: #ff8a3a; }
   #combo .bar { width: 100px; height: 6px; margin-left: auto; }
   #combo .bar i { background: #ff8a3a; }
-  #combo[hidden], #over-help[hidden] { display: none; }
-  #lb { margin: 8px auto; border-collapse: collapse; font-size: 12px; line-height: 1.7; }
-  #lb-box { max-height: 44vh; overflow-y: auto; pointer-events: auto; } /* the world's top 100 scrolls; .hud lets the pointer through */
-  #lb th { color: #ddcda6; font-weight: normal; padding: 0 8px; position: sticky; top: 0; background: #3f2616; }
-  #lb td { padding: 0 8px; }
-  #lb .me td { color: #ffd24a; }
-  .ini { color: #ffd24a; font-size: 24px; font-weight: normal; }
+  #combo[hidden] { display: none; }
   #banner { left: 50%; top: 22%; transform: translateX(-50%); font-size: 28px; padding: 10px 22px; white-space: nowrap; }
   #cards { left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; }
   #cards h2 { margin: 0 0 10px; font: inherit; font-size: 18px; }
   #cards-list { display: flex; gap: 12px; }
   .card { width: 150px; padding: 14px 10px; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 3px #ad7a48; font-size: 13px; line-height: 1.5; display: grid; gap: 8px; }
-  #select .card, #cards .card { pointer-events: auto; cursor: pointer; }
-  #select .card:hover, #cards .card:hover { box-shadow: inset 0 0 0 3px #ffd24a; }
+  #cards .card { pointer-events: auto; cursor: pointer; }
+  #cards .card:hover { box-shadow: inset 0 0 0 3px #ffd24a; }
   .card kbd { font-size: 22px; }
   .card .icon { width: 32px; height: 32px; image-rendering: pixelated; justify-self: center; }
-  #over, #pause { inset: 0; display: grid; place-items: center; background: rgba(12, 33, 64, 0.55); text-align: center; }
-  #over[hidden], #pause[hidden], #cards[hidden], #banner[hidden], #boarding[hidden], #board-hint[hidden] { display: none; }
+  #cards[hidden], #banner[hidden], #boarding[hidden], #board-hint[hidden] { display: none; }
   #boarding { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 420px; display: grid; gap: 10px; text-align: center; }
   #boarding h2 { margin: 0; font: inherit; font-size: 24px; color: #ffd24a; }
   .b-row { display: grid; grid-template-columns: 110px 1fr 36px; gap: 8px; align-items: center; font-size: 12px; text-align: left; }
@@ -55,8 +49,6 @@
   #b-msg { min-height: 18px; font-size: 14px; color: #ffd24a; }
   .b-help { font-size: 11px; color: #ddcda6; }
   #board-hint { position: absolute; left: 0; top: 0; font-size: 12px; color: #ffd24a; background: #1b110b; padding: 2px 6px; white-space: nowrap; }
-  #over .panel { font-size: 16px; line-height: 2; }
-  #over h1 { font: inherit; font-size: 40px; margin: 0; color: #d84a38; }
   #radar-box { right: 16px; bottom: 16px; padding: 0; background: none; border: 0; box-shadow: none; }
   #radar { display: block; width: 224px; height: 224px; image-rendering: pixelated; }
   #bars { inset: 0; }
@@ -67,17 +59,6 @@
   .pop { position: absolute; transform: translate(-50%, -50%); color: #ffd24a; font-size: 18px; animation: pop 1.2s steps(12) forwards; }
   .pop.combo { color: #ff7a2a; font-size: 26px; margin-top: -28px; }
   @keyframes pop { to { transform: translate(-50%, -250%); opacity: 0; } }
-  #select { left: 50%; bottom: 72px; transform: translateX(-50%); text-align: center; }
-  #select h2 { margin: 0 0 10px; font: inherit; font-size: 18px; }
-  #select-list { display: flex; gap: 12px; }
-  #select .card { width: 190px; text-align: left; }
-  #select .card b { font-weight: normal; font-size: 18px; color: #ffd24a; }
-  #select .blurb { font-size: 11px; color: #ddcda6; }
-  #select .stats { display: grid; grid-template-columns: 70px 1fr; gap: 4px 8px; align-items: center; font-size: 10px; }
-  #select .bar i { background: #f5ecd2; }
-  #select[hidden] { display: none; }
-  #select .kit { font-size: 10px; line-height: 2; color: #ffd24a; }
-  #select .kit img { width: 16px; height: 16px; image-rendering: pixelated; vertical-align: middle; margin-right: 6px; }
   #skills { right: 256px; bottom: 34px; display: flex; gap: 10px; }
   .slot { position: relative; width: 56px; height: 56px; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 3px #ad7a48; display: grid; place-items: center; }
   .slot img { width: 40px; height: 40px; image-rendering: pixelated; }
@@ -88,12 +69,7 @@
   .slot.armed { border-color: #ffd24a; box-shadow: inset 0 0 0 3px #ff9b26; }
   .slot.locked { opacity: 0.5; } .slot.locked b { font-size: 22px; font-weight: normal; color: #b9a57d; }
   body.selecting #stats, body.selecting #score, body.selecting #radar-box, body.selecting #skills { display: none; }
-  #lobby { width: 0; min-width: 100%; margin-top: 12px; font-size: 12px; pointer-events: auto; display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
-  #lobby button, #lobby input { font: inherit; color: #f5ecd2; background: #56351f; border: 3px solid #1b110b; box-shadow: inset 0 0 0 2px #ad7a48; padding: 4px 10px; cursor: pointer; }
-  #lobby input { width: 64px; text-transform: uppercase; text-align: center; cursor: text; }
-  #lobby #nick { width: 112px; } #lobby .br { flex-basis: 100%; }
-  #lobby button:disabled, #lobby input:disabled { opacity: 0.5; cursor: default; }
-  #lobby-msg { width: 100%; min-height: 16px; color: #ffd24a; }
+  body.menus #help, body.menus #room, #help[hidden] { display: none; } /* a menu screen is open (ui.js) */
   #room { left: 50%; top: 16px; transform: translateX(-50%); font-size: 12px; text-align: center; line-height: 1.6; }
   #room b { color: #ffd24a; font-weight: normal; font-size: 16px; }
   #room[hidden], #coop[hidden], #pvp[hidden] { display: none; }
@@ -108,15 +84,13 @@
 </head>
 <body class="selecting">
 <canvas id="c"></canvas>
-<div id="select" class="hud panel"><h2>Choose your ship: click or press 1, 2 or 3</h2><div id="select-list"></div>
-  <div id="lobby"><button id="gm">GAME: WAVES</button><input id="nick" maxlength="12" placeholder="NAME" autocomplete="off"><button id="quick-coop">QUICK CO-OP</button><button id="quick-pvp">QUICK PVP</button><i class="br"></i>ONLINE <button id="host-coop">HOST CO-OP</button><button id="host-pvp">HOST PVP</button><input id="code" maxlength="4" placeholder="CODE" autocomplete="off"><button id="join">JOIN</button><span id="lobby-msg"></span></div>
-</div>
+<div id="ui" class="bs-ui"><div id="ui-veil"></div><div id="ui-stage"><div id="ui-screen"></div><div id="ui-hints" class="bs-hints"></div><div id="ui-modal"></div><div id="ui-toasts"></div></div></div>
 <div id="room" class="hud panel" hidden></div>
 <div id="stats" class="hud panel">
   <span>HULL</span><div class="bar"><i id="hp"></i></div>
   <span>SAIL</span><div class="bar"><i id="sail"></i></div>
-  <span><kbd>A</kbd> PORT</span><div class="bar"><i id="rp"></i></div>
-  <span><kbd>E</kbd> STAR</span><div class="bar"><i id="rs"></i></div>
+  <span><kbd id="k-port"></kbd> PORT</span><div class="bar"><i id="rp"></i></div>
+  <span><kbd id="k-star"></kbd> STAR</span><div class="bar"><i id="rs"></i></div>
   <span>CREW <b id="crewn"></b></span><div class="bar"><i id="crew"></i></div>
 </div>
 <div id="score" class="hud panel"><div id="pvp" hidden></div><div id="coop">GOLD <b id="gold">0</b><br><span id="wave-l">WAVE</span> <b id="wave">0</b><span id="navy" hidden><br>NAVY GOLD <b id="delivered">0</b></span></div><div id="combo" hidden>COMBO <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
@@ -131,12 +105,10 @@
   <div id="b-line"><i id="b-zone"></i><i id="b-target"></i><i id="b-cursor"></i></div>
   <div class="bar" id="b-timebar"><i id="b-time"></i></div>
   <div id="b-msg"></div>
-  <div class="b-help"><kbd>SPACE</kbd> when the cursor is on the gold mark</div>
+  <div class="b-help"><kbd id="k-board"></kbd> when the cursor is on the gold mark</div>
 </div>
-<div id="cards" class="hud panel" hidden><h2>Refit your ship: click or press 1, 2 or 3</h2><div id="cards-list"></div></div>
-<div id="over" class="hud" hidden><div class="panel"><h1>SUNK</h1><div id="over-stats"></div><div id="over-help"><kbd>Space</kbd> to sail again</div></div></div>
-<div id="pause" class="hud" hidden><div class="panel"><h1>PAUSED</h1><div><kbd>P</kbd> to resume</div></div></div>
-<div id="help" class="hud panel"><kbd>↑</kbd>/<kbd>↓</kbd> sail up/down · <kbd>←</kbd>/<kbd>→</kbd> turn · <kbd>A</kbd> fire left · <kbd>E</kbd> fire right · <kbd>1</kbd>-<kbd>4</kbd> skills · <kbd>Space</kbd> board · <kbd>M</kbd> sound · <kbd>C</kbd> zoom · <kbd>P</kbd> pause</div>
+<div id="cards" class="hud panel" hidden><h2 id="cards-h"></h2><div id="cards-list"></div></div>
+<div id="help" class="hud panel"></div>
 <script type="module" src="game.js"></script>
 </body>
 </html>

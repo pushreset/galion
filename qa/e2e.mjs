@@ -9,10 +9,12 @@ const { chromium } = require(process.env.PLAYWRIGHT || '../../ttrpg-online-platf
 const URL = process.env.URL || 'http://127.0.0.1:8765/';
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, headless: true, args: ['--ignore-gpu-blocklist', '--use-angle=metal'] });
 const errors = [];
-async function open(name) {
+// boot: where the page lands (game.js reads sessionStorage broadside.boot); the captain's name is already stored
+async function open(name, boot = 'online', captain = 'ANNE') {
   const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_|CORS/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
+  await page.addInitScript(([boot, captain]) => { localStorage.setItem('broadside.name', JSON.stringify(captain)); sessionStorage.setItem('broadside.boot', boot); }, [boot, captain]);
   await page.goto(URL, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
   await page.evaluate(() => { // log every sound this page plays
@@ -21,7 +23,8 @@ async function open(name) {
   });
   return page;
 }
-const lobby = (page, re) => page.waitForFunction((src) => new RegExp(src).exec(document.getElementById('lobby-msg').textContent)?.[1] ?? null, re.source, { timeout: 30000 }).then((h) => h.jsonValue());
+const screen = (page, id) => page.waitForFunction((id) => __game.ui.top() === id, id, { timeout: 30000 });
+const says = (page, re) => page.waitForFunction((src) => new RegExp(src).test(document.getElementById('ui').textContent), re.source, { timeout: 30000 });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const count = (page, k) => page.evaluate((k) => snd.filter((n) => n === k).length, k);
 
@@ -34,33 +37,37 @@ const count = (page, k) => page.evaluate((k) => snd.filter((n) => n === k).lengt
   await p.context().close();
 }
 
-// 1. a room that fails to open: no ship can be picked while it opens, and no phantom hulls afterwards
+// 1. a room that fails to open: a message, back in the hub with nothing started, and no phantom hulls in the solo run that follows
 {
   const p = await open('fail');
   await p.evaluate(() => { window.Peer = class { on(e, f) { if (e === 'error') setTimeout(() => f({ type: 'network' }), 500); } destroy() {} }; });
-  await p.click('#host-coop');
-  await p.keyboard.press('Digit1');
-  assert.deepEqual(await p.evaluate(() => [__game.state.mode, __game.players.length]), ['select', 0], 'host picked a ship before the room opened');
-  await lobby(p, /(COULD NOT OPEN)/);
-  await p.keyboard.press('Digit1');
+  await p.click('[data-f=create]');
+  await says(p, /COULD NOT OPEN A ROOM/);
+  assert.deepEqual(await p.evaluate(() => [__game.ui.top(), __game.state.mode, __game.players.length]), ['online', 'select', 0]);
+  await p.keyboard.press('Escape');
+  for (const f of ['solo', 'next', 'sail']) await p.click(`[data-f=${f}]`);
   await sleep(300);
   assert.deepEqual(await p.evaluate(() => [__game.state.mode, __game.ships.length, __game.ships.filter((s) => !s.mesh.root.parent).length]), ['between', 1, 0], 'solo after a failed room is not clean');
   await p.context().close();
 }
 
-// 2. PvP room: the host stays on ship select, one guest plays
-const H = await open('host'), G = await open('guest');
-await H.click('#host-pvp');
-const code = await lobby(H, /ROOM ([A-Z]{4})/);
-await G.fill('#nick', 'jack42!'); // letters only, 12 max
-assert.equal(await G.inputValue('#nick'), 'JACK');
-await G.fill('#code', code);
-await G.click('#join');
-await lobby(G, /(JOINED PVP)/);
+// 2. PvP room: the host opens it and picks the mode, a guest joins with the code, both pick a ship, the host sets sail
+const H = await open('host'), G = await open('guest', 'online', 'JACK');
+await H.click('[data-f=create]');
+await screen(H, 'lobby');
+const code = await H.evaluate(() => [...document.querySelectorAll('.bs-code span')].map((s) => s.textContent).join(''));
+await H.click('[data-f=m-pvp]');
+await H.keyboard.press('Digit3');
+await G.fill('#room-code', code);
+await G.click('[data-f=join]');
+await screen(G, 'lobby');
 await G.keyboard.press('Digit1');
-await G.waitForFunction(() => __game.player, null, { timeout: 20000 });
-assert.equal(await H.evaluate(() => __game.state.mode), 'select');
-assert.equal(await H.evaluate(() => __game.players[0]?.tag), 'JACK', 'host did not get the guest name');
+await G.click('[data-f=ready]');
+await says(H, /SET SAIL · ALL READY/);
+assert.equal(await H.evaluate(() => __game.players.length), 0, 'a ship exists before the start');
+await H.click('[data-f=sail]');
+await G.waitForFunction(() => __game.player && !__game.ui.top(), null, { timeout: 20000 });
+assert.deepEqual(await H.evaluate(() => [__game.state.mode, ...__game.players.map((p) => p.tag)]), ['pvp', 'ANNE', 'JACK'], 'host did not get the guest name');
 await G.waitForFunction(() => document.querySelector('.ebar.self:not([hidden])')?.dataset.tag === 'JACK', null, { timeout: 5000 });
 
 // snapshots: 20 a second (state.t only changes on the guest when one arrives)
@@ -80,19 +87,20 @@ const [hs, gs] = [await heard(H), await heard(G)];
 assert.ok(gs.boom >= 1, 'guest heard no broadside');
 assert.deepEqual(gs, hs, 'guest and host played different sounds');
 
-// boarding while the host is still on ship select, far from the host's ear ({6, 6} with no ship)
-const spot = [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([a, b]) => [a * (BOUNDS.x - 25), b * (BOUNDS.z - 25)]).find(([x, z]) => ISLANDS.every((I) => Math.hypot(x - I.x, z - I.z) > I.r + 25));
-assert.ok(spot, 'no free corner');
-await H.evaluate(([x, z]) => {
+// boarding in one corner of the arena, the host's ship (its ear) held in another
+const [spot, away] = [[1, 1], [-1, -1], [-1, 1], [1, -1]].map(([a, b]) => [a * (BOUNDS.x - 25), b * (BOUNDS.z - 25)]).filter(([x, z]) => ISLANDS.every((I) => Math.hypot(x - I.x, z - I.z) > I.r + 25));
+assert.ok(spot && away, 'no two free corners');
+await H.evaluate(([[x, z], [hx, hz]]) => {
   window.pin = setInterval(() => { // keep a struck merchant alongside the guest
-    const g = __game.players[0], m = __game.ships.find((s) => s.merchant && s.alive && !s.escaped);
+    const [h, g] = __game.players, m = __game.ships.find((s) => s.merchant && s.alive && !s.escaped);
+    Object.assign(h, { x: hx, z: hz, speed: 0, sail: 0, hp: h.maxHp });
     if (!m) return void (__game.state.nextAt = 0);
-    Object.assign(g, { x, z, speed: 0, sail: 0 });
+    Object.assign(g, { x, z, speed: 0, sail: 0, hp: g.maxHp });
     Object.assign(m, { x: x + 8, z, speed: 0, hp: m.maxHp * 0.1 });
   }, 16);
-}, spot);
+}, [spot, away]);
 const board = async (n) => { // the host's state decides when the merchant is ready (the guest's copy lags a snapshot)
-  await H.waitForFunction(() => (window.tgt = __game.ships.find((s) => s.merchant && s.alive && s.hp < 0.2 * s.maxHp)) && !(__game.players[0].boardCd > 0), null, { timeout: 20000 });
+  await H.waitForFunction(() => (window.tgt = __game.ships.find((s) => s.merchant && s.alive && s.hp < 0.2 * s.maxHp)) && !(__game.players[1].boardCd > 0), null, { timeout: 20000 });
   await sleep(150);
   await G.keyboard.press('Space');
   await H.waitForFunction(() => !tgt.alive, null, { timeout: 5000 });
