@@ -7,6 +7,8 @@ import { createWakes, createFx } from './fx.js';
 import { sfx, unlock, toggleMute, setPaused, setCombat } from './sfx.js';
 import { hostRoom, joinRoom, match, worldScores, MAX_PLAYERS } from './net.js';
 import * as ui from './ui.js';
+import { initScreens } from './screens.js';
+import { store, SHIPS } from './store.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
   const p = me || { x: 6, z: 6 }, dx = x - p.x, dz = z - p.z;
@@ -195,6 +197,7 @@ addEventListener('keydown', (e) => {
   if (e.target.tagName === 'BUTTON') return; // a focused lobby button keeps Enter / Space (the click handlers blur it)
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.repeat) return;
+  if (e.code === 'Escape' && state.mode === 'select' && net === 'solo' && !quick) return ui.reset('menu'); // the old panel, until its screens exist
   if (e.code === 'KeyP') return net === 'solo' && togglePause(); // not Esc: Firefox spends it on leaving fullscreen. Online: the world never stops
   if (paused) return; // before unlock(): it resumes the audio context
   if (state.entry !== undefined) { // SUNK screen: typing initials, nothing else reacts (no mute, no reload)
@@ -299,16 +302,32 @@ addEventListener('resize', resize);
 resize();
 
 const camTarget = new THREE.Vector3();
+// the menus turn the camera (title: a slow orbit); the game always looks from CAM_AZ
+let camAz = CAM_AZ;
+function setAz(a) {
+  camAz = a;
+  camDir.set(Math.cos(CAM_EL) * Math.cos(a), Math.sin(CAM_EL), Math.cos(CAM_EL) * Math.sin(a));
+  camera.position.copy(camDir).multiplyScalar(200);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld();
+  camRight.setFromMatrixColumn(camera.matrixWorld, 0);
+  camUp.setFromMatrixColumn(camera.matrixWorld, 1);
+}
 function updateCamera(dt, snapNow) {
-  const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // select screen: aim below the row so ships sit above the cards
-  const want = overview ? new THREE.Vector3() : new THREE.Vector3(p.x + Math.cos(p.h) * p.speed * 0.9, 0, p.z + Math.sin(p.h) * p.speed * 0.9);
-  const wantH = overview ? MAP.view : VIEW_H;
+  const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // old select panel: aim below the row so ships sit above the cards
+  // a menu screen frames the scene behind it: { orbit } the three ships turning, { ship, side } one of them on the left (-1) or right (1), else the open sea
+  const sh = ui.shot(), ship = sh && PREVIEW[sh.ship];
+  if (sh?.orbit) setAz(camAz + dt * 0.05); else if (camAz !== CAM_AZ) setAz(CAM_AZ);
+  for (const s of PREVIEW) s.mesh.root.visible = !ship || s === ship; // one ship framed: her sisters are not peeking from under the panels
+  const wantH = sh ? (ship ? 30 : sh.orbit ? 48 : 64) : overview ? MAP.view : VIEW_H;
+  const want = ship ? new THREE.Vector3(ship.x, 0, ship.z).addScaledVector(camRight, -sh.side * wantH * (iw / ih) * 0.24)
+    : sh || overview ? new THREE.Vector3() : new THREE.Vector3(p.x + Math.cos(p.h) * p.speed * 0.9, 0, p.z + Math.sin(p.h) * p.speed * 0.9);
   if (viewH !== wantH) {
     viewH = snapNow || Math.abs(wantH - viewH) < 0.05 ? wantH : viewH + (wantH - viewH) * (1 - Math.exp(-6 * dt));
     setProjection();
   }
   if (snapNow) camTarget.copy(want);
-  else camTarget.lerp(want, 1 - Math.exp(-3 * dt));
+  else camTarget.lerp(want, 1 - Math.exp(-(sh ? 10 : 3) * dt)); // menus: a 300 ms travelling
   // Snap the camera to whole texels along its screen axes: static world pixels stop crawling.
   const r = camTarget.dot(camRight), u = camTarget.dot(camUp);
   const t = camTarget.clone()
@@ -494,12 +513,13 @@ let guestShip = null;
 function choosePlayer(i) {
   if (net === 'guest') { // the host builds our ship; snapshots bring it back
     guestShip = i;
-    room.send({ t: 'ship', i, nick: $('nick').value });
+    room.send({ t: 'ship', i, nick: $('nick').value || store.name });
     me = null;
     hideSelect();
     return;
   }
-  me = makePirate(PREVIEW[i], 0, i, $('nick').value);
+  if (net === 'solo') { store.lastMode = convoy ? 'convoy' : 'waves'; store.lastShip = SHIPS[i]; } // the menu's SET SAIL
+  me = makePirate(PREVIEW[i], 0, i, $('nick').value || store.name);
   if (!ships.includes(me)) ships.push(me); // a host's previews wait outside the sim (hostGame)
   players.push(me);
   hideSelect();
@@ -1492,6 +1512,20 @@ $('join').onclick = (e) => { e.currentTarget.blur(); joinGame(); };
 $('quick-coop').onclick = (e) => { e.currentTarget.blur(); quickGame('coop'); };
 $('quick-pvp').onclick = (e) => { e.currentTarget.blur(); quickGame('pvp'); };
 
+// --- menus (ui.js, screens.js): what the game lends them -----------------------------
+initScreens({
+  ships: PREVIEW.map((s, i) => ({ name: s.name.toUpperCase(), blurb: PLAYER_SHIPS[i].blurb.toUpperCase() })),
+  unlock,
+  muteLabel: () => 'M',
+  startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); },
+  oldPanel: () => ui.reset(),
+});
+ui.setOnChange(() => document.body.classList.toggle('menus', ui.active()));
+// broadside.boot: a reload asked for by the menus (a run starts from a fresh page) says where to land
+let boot = null;
+try { boot = sessionStorage.getItem('broadside.boot'); sessionStorage.removeItem('broadside.boot'); } catch {}
+if (!store.name || !boot) ui.open('title');
+else ui.reset('menu');
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
 window.__game = {
