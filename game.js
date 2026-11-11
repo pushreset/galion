@@ -941,6 +941,7 @@ function bobLoot(o) {
 }
 
 const _m = new THREE.Matrix4();
+let pbAt = 0; // last POINT BLANK popup: one per second, not one per gun
 function updateBalls(dt) {
   for (let i = pending.length - 1; i >= 0; i--) {
     const b = pending[i];
@@ -962,6 +963,7 @@ function updateBalls(dt) {
       fx.hit(b.x, isFort ? 5.5 : Math.max(1, b.y), b.z);
       if (isFort && !ev.hit.alive) fortDown(ev.hit);
       sound('hit', b.x, b.z);
+      if (ev.pb && performance.now() - pbAt > 1000) { pbAt = performance.now(); popup(b.x, b.z, 'POINT BLANK'); }
       if (ev.hit === me) shake = Math.max(shake, 0.3);
     } else if (ev.land) {
       fx.hit(b.x, 1.5, b.z);

@@ -138,7 +138,7 @@ function collide(s) {
 }
 
 // --- combat ---------------------------------------------------------------
-export const BALL = { speed: 26, g: 18, y0: 1.3, apex: 3.6, dmg: 9 };
+export const BALL = { speed: 26, g: 18, y0: 1.3, apex: 3.6, dmg: 9, pb: 8, pbMul: 1.5 }; // pb: point-blank, a hit within pb units of the muzzle deals ×pbMul (about boarding range)
 // Every gun fires the same low arc (looks right, height no longer matters for hits); long guns shoot
 // faster instead of lobbing higher. A 36-range lob used to sail over targets between 11 and 23 units.
 const ARC_VY = Math.sqrt(2 * BALL.g * (BALL.apex - BALL.y0));
@@ -179,11 +179,11 @@ export function fireBroadside(s, side, rand = Math.random) {
 function makeBall(s, x, z, dx, dz, sp, delay) {
   return {
     x, y: BALL.y0, z, vx: dx * sp + Math.cos(s.h) * s.speed, vy: ARC_VY, vz: dz * sp + Math.sin(s.h) * s.speed,
-    team: s.team, dmg: BALL.dmg * s.dmgMul, delay, ox: dx, oz: dz,
+    team: s.team, dmg: BALL.dmg * s.dmgMul, delay, ox: dx, oz: dz, x0: x, z0: z,
   };
 }
 
-// Returns { hit: ship } | { splash: true } | null.
+// Returns { hit: ship, pb } | { land: true } | { splash: true } | null.
 export function stepBall(b, dt, ships) {
   b.vy -= BALL.g * dt;
   b.x += b.vx * dt;
@@ -196,10 +196,11 @@ export function stepBall(b, dt, ships) {
     const lx = dx * c + dz * sn, lz = -dx * sn + dz * c;
     if (s.isl ? Math.hypot(dx, dz) < shoreR(s.isl, Math.atan2(dz, dx)) : Math.abs(lx) < s.len / 2 && Math.abs(lz) < s.beam * 0.6) { // a fort: its whole island
       s.lastHit = b.team; // kill credit (PvP)
-      damage(s, b.dmg);
+      const pb = Math.hypot(b.x - b.x0, b.z - b.z0) < BALL.pb; // a fort's ball carries no origin: NaN, never point-blank
+      damage(s, b.dmg * (pb ? BALL.pbMul : 1));
       if (b.ammo?.id === 'chain') s.slowT = Math.max(s.slowT, 3 * b.ammo.p);
       if (b.ammo?.id === 'fire') s.burnT = Math.max(s.burnT, 4 * b.ammo.p);
-      return { hit: s };
+      return { hit: s, pb };
     }
   }
   // islands stop balls (same footprint-only rule; a standing fort is tested above, over its island).

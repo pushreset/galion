@@ -31,6 +31,23 @@ for (const h of [0, 1, -2.3]) {
   assert.ok(Math.abs(Math.hypot(b.x, b.z) - 34) < 4, 'range off: ' + Math.hypot(b.x, b.z));
 }
 
+// point-blank: the same broadside hits 1.5× harder alongside than at mid range; a fort's ball never does
+{
+  const volley = (d) => {
+    const s = makeShip('galleon', 0, 0, 0, 0), tgt = makeShip('galleon', 1, 0, d, 0);
+    const pbs = fireBroadside(s, 1, r0).map((b) => { for (let i = 0; i < 400; i++) { const ev = stepBall(b, 1 / 60, [s, tgt]); if (ev) return ev.pb; } });
+    return { lost: tgt.maxHp - tgt.hp, pbs };
+  };
+  const near = volley(8), far = volley(26);
+  assert.ok(near.pbs.every((p) => p === true) && far.pbs.every((p) => p === false), 'point-blank flag');
+  assert.ok(Math.abs(near.lost - 1.5 * far.lost) < 1e-9, `point-blank damage: ${near.lost} vs ${far.lost}`);
+  const tgt = makeShip('galleon', 0, 3, 0, 0), t = makeTurret(0, 1, 0);
+  t.reload = 0;
+  const b = fireTurret(t, tgt, 0, r0);
+  let ev; while (!(ev = stepBall(b, 1 / 120, [tgt]))) {}
+  assert.equal(ev.pb, false, 'fort ball point-blank');
+}
+
 // own team is never hit
 {
   const s = makeShip('galleon', 0, 0, 0, 0), friend = makeShip('sloop', 0, 0, 20, 0);
