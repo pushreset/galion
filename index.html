@@ -18,7 +18,7 @@
   #stats { left: 16px; top: 16px; display: grid; grid-template-columns: auto 160px; gap: 6px 10px; align-items: center; font-size: 12px; }
   .bar { height: 10px; background: #1b110b; border: 2px solid #1b110b; }
   .bar i { display: block; height: 100%; width: 0; }
-  #hp { background: #d84a38; } #sail { background: #f5ecd2; } #rp, #rs { background: #3aa0c6; } #crew { background: #ddcda6; } #crewn { font-weight: normal; color: #ffd24a; } #hp.fix { background: #94c54c; }
+  #hp { background: #d84a38; } #sail { background: #f5ecd2; } #rp, #rs { background: #3aa0c6; } #crew { background: #ddcda6; } #crewn, #kn { font-weight: normal; color: #ffd24a; } #hp.fix { background: #94c54c; }
   kbd { color: #ffd24a; }
   #score { right: 16px; top: 16px; text-align: right; font-size: 14px; line-height: 1.6; }
   #score b { color: #ffd24a; font-weight: normal; }
@@ -89,7 +89,7 @@
 <div id="room" class="hud panel" hidden></div>
 <div id="stats" class="hud panel">
   <span>HULL</span><div class="bar"><i id="hp"></i></div>
-  <span>SAIL</span><div class="bar"><i id="sail"></i></div>
+  <span>SAIL <b id="kn"></b></span><div class="bar"><i id="sail"></i></div>
   <span><kbd id="k-port"></kbd> PORT</span><div class="bar"><i id="rp"></i></div>
   <span><kbd id="k-star"></kbd> STAR</span><div class="bar"><i id="rs"></i></div>
   <span>CREW <b id="crewn"></b></span><div class="bar"><i id="crew"></i></div>

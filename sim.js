@@ -3,6 +3,11 @@
 // Increasing h turns toward starboard; starboard = (-sin h, cos h), port = (sin h, -cos h).
 
 export const BOUNDS = { x: 120, z: 120 }; // half-size of the playable rectangle (setMap)
+// a: where the wind blows to (same frame as ship.h; the swell in water.js, the smoke in fx.js and the loot drift follow it). k: strength, 0 = no wind.
+// Drawn once per page load, and a run starts from a fresh page (game.js reboot): a new wind every run, steady during it. Guests take the host's (snapshot).
+export const WIND = { a: Math.random() * Math.PI * 2, k: 1 };
+// Speed factor at heading h: 1 running, 1.15 on the beam, 0.75 dead upwind. Only headings within 52° of upwind are slowed.
+export const windMul = (h) => { const c = Math.cos(h - WIND.a), up = Math.max(0, -c); return 1 + WIND.k * (0.15 * (1 - c * c) - 0.25 * up * up); };
 
 export const TYPES = {
   galleon: { len: 14, beam: 4.2, hp: 120, speed: 8.5, turn: 0.62, cannons: 5, range: 34, reloadTime: 4.8, gold: 35, aimTol: 0.12, crew: 40 },
@@ -97,7 +102,7 @@ export function stepShip(s, dt) {
   s.boardCd = Math.max(0, s.boardCd - dt);
   if (s.burnT > 0) { s.burnT = Math.max(0, s.burnT - dt); damage(s, BURN_DPS * dt); }
   const slow = s.slowT > 0, boost = s.boostT > 0;
-  const target = SAIL_LEVELS[s.sail] * s.maxSpeed * (slow ? 0.45 : 1) * (boost ? 1.7 : 1);
+  const target = SAIL_LEVELS[s.sail] * s.maxSpeed * (slow ? 0.45 : 1) * (boost ? 1.7 : s.type === 'kraken' ? 1 : windMul(s.h)); // Full sail (oars out) and the kraken ignore the wind
   const acc = boost ? 5 : target > s.speed ? 1.6 : 2.6; // sails take a while to fill, drag bites faster
   s.speed += Math.sign(target - s.speed) * Math.min(Math.abs(target - s.speed), acc * dt);
   // Rudder needs water flow; keep a small floor so a becalmed ship can still swing.

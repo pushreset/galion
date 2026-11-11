@@ -4,15 +4,13 @@ Backlog d'idées pour la suite. Coût : **S** = quelques heures, **M** = une dem
 
 ## Recommandé en premier
 
-1. **Vent réel** : le meilleur rapport profondeur/coût, toute la navigation devient intéressante.
-2. **Prime sur ta tête + boss** : de la tension et des pics de rythme, au lieu d'un simple compteur de vagues.
-3. **Boutique** : à combiner avec n'importe laquelle, pour que l'or serve enfin à quelque chose.
+1. **Prime sur ta tête + boss** : de la tension et des pics de rythme, au lieu d'un simple compteur de vagues.
+2. **Boutique** : à combiner avec n'importe laquelle, pour que l'or serve enfin à quelque chose.
 
 ## Profondeur tactique
 
 | Idée | Ce que ça apporte | Coût |
 |---|---|---|
-| **Vent réel** | La vitesse dépend de l'angle au vent : rapide vent de travers, lent face au vent. Flèche de vent sur la boussole. Se placer devient un vrai choix (poursuivre un marchand, fuir). | S |
 | **Dégâts localisés** | Voiles touchées = plus lent, canons touchés = recharge plus lente, coque = points de vie. Les boulets ramés visent les voiles. | M |
 | **Tirs télégraphiés** | Le fort et les gros navires tirent au mortier : un cercle rouge apparaît sur l'eau, puis l'impact. On les esquive en manœuvrant. | S |
 

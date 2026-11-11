@@ -15,11 +15,10 @@ function ear(x, z) {
   return [Math.max(0, 1 - Math.hypot(dx, dz) / 110), (dx - dz) / Math.SQRT2 / 50];
 }
 import { createRadar } from './radar.js';
-import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, SLAM } from './sim.js';
+import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, SLAM, WIND } from './sim.js';
 
 const VIEW_H = 40; // world units visible vertically
 const TARGET_PX_H = 300; // internal render height ≈ this; integer upscale to the screen
-const WIND = Math.atan2(0.6, 0.8); // matches water.js swell direction
 const CAM_AZ = Math.PI / 4, CAM_EL = (38 * Math.PI) / 180;
 
 // 8×8 pixel skill icons (palette colours), rendered once to data URLs for the skill bar / ship cards
@@ -75,6 +74,8 @@ sun.shadow.bias = -0.0008;
 scene.add(sun, sun.target);
 
 const sea = createSea();
+const setWind = (a) => { WIND.a = a; sea.uWind.value.set(Math.cos(a), Math.sin(a)); }; // the swell follows the sim's wind
+setWind(WIND.a);
 scene.add(sea.mesh);
 let world = createWorld(scene);
 const wakes = createWakes(scene);
@@ -381,9 +382,9 @@ function syncShip(s, t, dt) {
     body.localToWorld(_v);
     fx.burn(_v.x, _v.y, _v.z);
   }
-  flag.rotation.y = Math.sin(t * 4 + s.seed) * 0.3;
+  flag.rotation.y = s.h + Math.PI - WIND.a + Math.sin(t * 4 + s.seed) * 0.3; // streams downwind
   // Brace the yards toward the wind (same wind as the sea swell): sails swing as the ship turns.
-  let rel = WIND - s.h;
+  let rel = WIND.a - s.h;
   rel = Math.atan2(Math.sin(rel), Math.cos(rel));
   const brace = -Math.max(-0.65, Math.min(0.65, rel * 0.55));
   s.brace = (s.brace ?? brace) + (brace - (s.brace ?? brace)) * Math.min(1, dt * 2);
@@ -919,7 +920,7 @@ function updateLoot(dt) {
     const o = loot[i];
     o.life -= dt;
     o.vx *= 0.98; o.vz *= 0.98;
-    o.x += (o.vx + 0.6) * dt; o.z += (o.vz + 0.45) * dt; // drift downwind
+    o.x += (o.vx + 0.75 * Math.cos(WIND.a)) * dt; o.z += (o.vz + 0.75 * Math.sin(WIND.a)) * dt; // drift downwind
     // crew hauls in anything within 16 units, so sailing near the wreck is enough
     const P = nearestPlayer(o) || { x: 0, z: 0 }, dx = P.x - o.x, dz = P.z - o.z, d = Math.hypot(dx, dz);
     if (P.alive && d < 16) { o.x += (dx / d) * 12 * dt; o.z += (dz / d) * 12 * dt; }
@@ -1077,6 +1078,7 @@ function hud() {
     s.bar.firstChild.style.width = (s.hp / s.maxHp) * 100 + '%';
   }
   $('sail').style.width = (me.sail / 3) * 100 + '%';
+  $('kn').textContent = Math.round(me.speed) + ' KN'; // 1 unit/s reads as 1 knot
   $('hp').style.width = (me.hp / me.maxHp) * 100 + '%';
   $('hp').classList.toggle('fix', !!me.fix);
   const rt = me.reloadTime * crewMul(me);
@@ -1224,7 +1226,7 @@ function snap() {
     k: kegs.map((k) => [k.id, k.x, k.z]),
     j: slams.map((o) => [o.id, o.x, o.z, o.t]),
     f: forts.map((f) => [f.hp, f.alive, f.turrets.map((t) => t.aim)]),
-    g: { mode: state.mode, wave: state.wave, gold: state.gold, delivered: state.delivered, t: state.t, left: state.left, banner: state.banner > 0 ? state.bannerText : '', bt: state.banner, combo: [combo.n, combo.t] },
+    g: { mode: state.mode, wave: state.wave, gold: state.gold, delivered: state.delivered, t: state.t, left: state.left, banner: state.banner > 0 ? state.bannerText : '', bt: state.banner, combo: [combo.n, combo.t], wind: WIND.a },
     e: events.splice(0),
   };
 }
@@ -1319,6 +1321,7 @@ function applySnap(m) {
   });
   const g = m.g, was = state.mode;
   Object.assign(state, { mode: g.mode, wave: +g.wave || 0, gold: +g.gold || 0, delivered: +g.delivered || 0, t: g.t, left: g.left });
+  if (Number.isFinite(g.wind) && g.wind !== WIND.a) setWind(g.wind);
   [combo.n, combo.t] = g.combo;
   combo.best = Math.max(combo.best, combo.n);
   if (g.banner && g.banner !== lastBanner) banner(g.banner, g.bt);

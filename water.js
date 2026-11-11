@@ -7,6 +7,7 @@ const PARS = /* glsl */ `
 uniform float uTime;
 uniform vec4 uIsl[8];
 uniform vec2 uArena;
+uniform vec2 uWind;
 varying vec3 vW;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -50,7 +51,7 @@ vec3 seaColor(vec2 p, float t) {
   k += int(sd < 22.0) + int(sd < 13.0) + int(sd < 7.0) + int(sd < 3.2);
 
   // Swell lines perpendicular to the wind, domain-warped and broken into strokes.
-  vec2 wd = vec2(0.8, 0.6);
+  vec2 wd = uWind;
   float ph = dot(p, wd) * 0.45 + fbm(p * 0.05 + 3.1) * 6.0 - t * 1.15;
   float s = sin(ph);
   float brk = noise(p * vec2(0.22, 0.16) + vec2(-t * 0.06, t * 0.035));
@@ -73,7 +74,7 @@ vec3 seaColor(vec2 p, float t) {
 `;
 
 export function createSea() {
-  const uTime = { value: 0 };
+  const uTime = { value: 0 }, uWind = { value: new THREE.Vector2() }; // uWind: unit vector the swell runs along (game.js setWind)
   const isl = Array.from({ length: 8 }, () => new THREE.Vector4());
   const arena = new THREE.Vector2();
   // (re)read the current map from sim.js: shorelines and the arena edge
@@ -87,6 +88,7 @@ export function createSea() {
     sh.uniforms.uTime = uTime;
     sh.uniforms.uIsl = { value: isl };
     sh.uniforms.uArena = { value: arena };
+    sh.uniforms.uWind = uWind;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vW;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -96,5 +98,5 @@ export function createSea() {
   };
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(900, 900).rotateX(-Math.PI / 2), mat);
   mesh.receiveShadow = true;
-  return { mesh, uTime, setMap };
+  return { mesh, uTime, uWind, setMap };
 }

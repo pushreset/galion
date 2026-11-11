@@ -1,5 +1,7 @@
 // Old-map compass rose radar. Directions are screen-relative (iso camera at 45°),
 // so a blip at the top of the rose is an enemy toward the top of the screen.
+import { WIND } from './sim.js';
+
 const S = 112, C = S / 2, R = 44, RANGE = 90;
 
 function drawRose() {
@@ -68,6 +70,17 @@ export function createRadar(canvas) {
       const k = Math.min(R, (d / RANGE) * R) / (d || 1);
       return { x: C + rx * k, y: C + ry * k, out: d > RANGE, a: Math.atan2(ry, rx) };
     };
+    // wind: a white dart on the frame, on the side it blows from, pointing in
+    const [wx, wy] = toRadar(-Math.cos(WIND.a), -Math.sin(WIND.a)), wa = Math.atan2(wy, wx);
+    g.fillStyle = '#ffffff';
+    g.strokeStyle = '#1b110b';
+    g.beginPath();
+    g.moveTo(C + Math.cos(wa) * 40, C + Math.sin(wa) * 40);
+    g.lineTo(C + Math.cos(wa + 0.16) * 53, C + Math.sin(wa + 0.16) * 53);
+    g.lineTo(C + Math.cos(wa - 0.16) * 53, C + Math.sin(wa - 0.16) * 53);
+    g.closePath();
+    g.fill();
+    g.stroke();
     for (const o of loot) { const p = place(o.x, o.z); if (!p.out) px(p.x, p.y, 2, '#c9952a'); }
     for (const o of ports) {
       const p = place(o.x, o.z);

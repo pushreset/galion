@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { WIND } from './sim.js';
 
 // Pooled flat foam blobs on the water. Hexagons read as chunky pixels after the post pass.
 export function createWakes(scene, max = 600) {
@@ -104,11 +105,11 @@ export function createFx(scene, wakes) {
   const fire = createParticles(scene, ico, new THREE.MeshBasicMaterial(), 500);
   const splash = createParticles(scene, ico, new THREE.MeshBasicMaterial(), 400);
   const debris = createParticles(scene, new THREE.BoxGeometry(1, 0.5, 2.2), new THREE.MeshLambertMaterial({ flatShading: true }), 200, true);
-  const WIND = [1.2, 0.9];
+  const drift = (k) => 1.5 * (k ? Math.sin(WIND.a) : Math.cos(WIND.a)); // smoke blows downwind
   return {
     muzzle(x, y, z, ox, oz) {
       for (let i = 0; i < 4; i++) fire.spawn({ x, y, z, vx: ox * rnd(5, 11), vy: rnd(0, 1.5), vz: oz * rnd(5, 11), drag: 6, life: rnd(0.1, 0.2), s0: rnd(0.6, 1), s1: 0.15, c0: C.flash0, c1: C.flash1 });
-      for (let i = 0; i < 6; i++) smoke.spawn({ x, y, z, vx: ox * rnd(2, 6) + WIND[0], vy: rnd(0.4, 1.4), vz: oz * rnd(2, 6) + WIND[1], drag: 1.2, life: rnd(1.4, 2.6), s0: rnd(0.4, 0.7), s1: rnd(1.3, 2), c0: C.smoke0, c1: C.smoke1, spin: 1 });
+      for (let i = 0; i < 6; i++) smoke.spawn({ x, y, z, vx: ox * rnd(2, 6) + drift(0), vy: rnd(0.4, 1.4), vz: oz * rnd(2, 6) + drift(1), drag: 1.2, life: rnd(1.4, 2.6), s0: rnd(0.4, 0.7), s1: rnd(1.3, 2), c0: C.smoke0, c1: C.smoke1, spin: 1 });
     },
     splash(x, z) {
       for (let i = 0; i < 12; i++) splash.spawn({ x: x + rnd(-0.3, 0.3), y: 0.1, z: z + rnd(-0.3, 0.3), vx: rnd(-1.2, 1.2), vy: rnd(5, 11), vz: rnd(-1.2, 1.2), g: 22, life: 1.2, s0: rnd(0.25, 0.45), s1: 0.1, c0: C.foam, c1: C.pale });
@@ -117,11 +118,11 @@ export function createFx(scene, wakes) {
     hit(x, y, z) {
       for (let i = 0; i < 9; i++) debris.spawn({ x, y, z, vx: rnd(-5, 5), vy: rnd(4, 10), vz: rnd(-5, 5), g: 20, life: 2, s0: rnd(0.18, 0.35), s1: rnd(0.18, 0.35), c0: Math.random() > 0.5 ? C.wood0 : C.wood1, spin: rnd(-12, 12) });
       for (let i = 0; i < 7; i++) fire.spawn({ x, y, z, vx: rnd(-3, 3), vy: rnd(1, 4), vz: rnd(-3, 3), drag: 4, life: rnd(0.2, 0.4), s0: rnd(0.7, 1.2), s1: 0.1, c0: C.flash0, c1: C.fire1 });
-      for (let i = 0; i < 4; i++) smoke.spawn({ x, y, z, vx: rnd(-1, 1) + WIND[0], vy: rnd(1, 2.5), vz: rnd(-1, 1) + WIND[1], drag: 0.8, life: rnd(1.5, 2.5), s0: 0.6, s1: 1.8, c0: C.dark0, c1: C.dark1, spin: 1 });
+      for (let i = 0; i < 4; i++) smoke.spawn({ x, y, z, vx: rnd(-1, 1) + drift(0), vy: rnd(1, 2.5), vz: rnd(-1, 1) + drift(1), drag: 0.8, life: rnd(1.5, 2.5), s0: 0.6, s1: 1.8, c0: C.dark0, c1: C.dark1, spin: 1 });
     },
     burn(x, y, z) {
       fire.spawn({ x: x + rnd(-0.3, 0.3), y, z: z + rnd(-0.3, 0.3), vx: rnd(-0.4, 0.4), vy: rnd(1.5, 3), vz: rnd(-0.4, 0.4), life: rnd(0.35, 0.6), s0: rnd(0.4, 0.7), s1: 0.05, c0: C.fire0, c1: C.fire1 });
-      if (Math.random() < 0.5) smoke.spawn({ x, y: y + 0.8, z, vx: WIND[0], vy: rnd(1.8, 2.8), vz: WIND[1], drag: 0.3, life: rnd(2, 3), s0: 0.4, s1: rnd(1.6, 2.4), c0: C.dark0, c1: C.dark1, spin: 1 });
+      if (Math.random() < 0.5) smoke.spawn({ x, y: y + 0.8, z, vx: drift(0), vy: rnd(1.8, 2.8), vz: drift(1), drag: 0.3, life: rnd(2, 3), s0: 0.4, s1: rnd(1.6, 2.4), c0: C.dark0, c1: C.dark1, spin: 1 });
     },
     cloud(x, z) { // smoke screen: big pale puffs hugging the water
       smoke.spawn({ x: x + rnd(-4, 4), y: rnd(0.5, 2), z: z + rnd(-4, 4), vx: rnd(-0.5, 0.5), vy: rnd(0.2, 0.8), vz: rnd(-0.5, 0.5), drag: 0.5, life: rnd(2, 3), s0: rnd(1, 1.6), s1: rnd(2.5, 3.5), c0: C.smoke0, c1: C.smoke1, spin: 1 });

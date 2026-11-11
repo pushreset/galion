@@ -1,6 +1,8 @@
 // node check.mjs — asserts on the pure sim, and on what the menus store.
 import assert from 'node:assert/strict';
-import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue } from './sim.js';
+import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul } from './sim.js';
+
+WIND.k = 0; // the checks below are written for still air; the wind block turns it back on
 
 const r0 = () => 0.5; // deterministic: no spread
 
@@ -488,5 +490,35 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   for (let i = 0; i < 9; i++) signLocal('waves', run(7, i));
   assert.equal(signLocal('waves', run(1, 0)).rank, -1, 'off the top 10');
   assert.equal(store.best.waves.length, 10);
+}
+// wind: beam reach > running > dead upwind, never under 75%; Full sail ignores it; the kraken slam is still dodgeable upwind
+{
+  WIND.k = 1;
+  setMap('waves');
+  const top = (rel, boost) => {
+    const s = makeShip('brig', 0, -40, -70, WIND.a + rel);
+    s.sail = 3;
+    for (let i = 0; i < 900; i++) { if (boost) s.boostT = 1; s.x = -40; s.z = -70; stepShip(s, 1 / 60); } // held in open water: only the speed matters
+    return s.speed / s.maxSpeed;
+  };
+  const run = top(0), beam = top(Math.PI / 2), up = top(Math.PI);
+  assert.ok(beam > run && run > up, `wind order: ${beam} ${run} ${up}`);
+  assert.ok(Math.abs(run - 1) < 1e-9 && Math.abs(beam - 1.15) < 1e-9 && Math.abs(up - 0.75) < 1e-9, `wind factors: ${beam} ${run} ${up}`);
+  for (let a = 0; a < 6.3; a += 0.1) assert.ok(windMul(a) >= 0.75 - 1e-9 && windMul(a) <= 1.15 + 1e-9, 'wind factor out of range');
+  assert.equal(top(Math.PI, true), top(0, true), 'Full sail ignores the wind');
+  const wa = WIND.a;
+  WIND.a = Math.PI; // the dodge below sails h = 0: dead upwind
+  for (const i of [0, 1, 2]) {
+    const kr = makeShip('kraken', 3, -40, -100, 0), p = makePlayer(i, -40, -70, 0);
+    p.sail = 3; p.speed = p.maxSpeed * 0.75;
+    const sl = krakenSteer(kr, [kr, p], r0);
+    for (let t = 0; t < 3 && sl.t > 0; t += 1 / 60) {
+      if (t >= 0.3) p.turnIn = 1;
+      stepShip(p, 1 / 60);
+      stepSlam(sl, 1 / 60, [p]);
+    }
+    assert.equal(p.hp, p.maxHp, `${PLAYER_SHIPS[i].name} should dodge the slam upwind`);
+  }
+  WIND.a = wa;
 }
 console.log('check ok');
