@@ -224,3 +224,10 @@
 .bs-title-bar { position: absolute; left: -200%; right: -200%; height: 2000px; background: var(--bs-sea-0); }
 .bs-title-blink { animation: bs-title-blink 1.1s steps(1) infinite; }
 @keyframes bs-title-blink { 50% { opacity: 0; } }
+
+/* mode card (solo, step 1): focus chooses it */
+.bs-card { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; text-align: left; cursor: pointer;
+  background: var(--bs-wood); border: 3px solid var(--bs-wood-edge); box-shadow: inset 0 0 0 2px var(--bs-trim), var(--bs-shadow); }
+.bs-card[aria-pressed="true"] { background: var(--bs-wood-hi); box-shadow: inset 0 0 0 2px var(--bs-gold), var(--bs-shadow); }
+.bs-card-name { font-size: 24px; line-height: 24px; font-weight: 700; }
+.bs-card[aria-pressed="true"] .bs-card-name { color: var(--bs-gold); }

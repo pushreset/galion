@@ -49,11 +49,19 @@ renderer.shadowMap.type = THREE.BasicShadowMap; // hard shadow edges, no blur to
 
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 400);
-const camDir = new THREE.Vector3(Math.cos(CAM_EL) * Math.cos(CAM_AZ), Math.sin(CAM_EL), Math.cos(CAM_EL) * Math.sin(CAM_AZ));
-camera.position.copy(camDir).multiplyScalar(200);
-camera.lookAt(0, 0, 0);
-const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+// the camera looks from azimuth `camAz`: always CAM_AZ in a run, the menus turn it (title: a slow orbit)
+const camDir = new THREE.Vector3(), camRight = new THREE.Vector3(), camUp = new THREE.Vector3();
+let camAz;
+function setAz(a) {
+  camAz = a;
+  camDir.set(Math.cos(CAM_EL) * Math.cos(a), Math.sin(CAM_EL), Math.cos(CAM_EL) * Math.sin(a));
+  camera.position.copy(camDir).multiplyScalar(200);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld(); // lookAt alone leaves the matrix, and the two screen axes read from it, stale
+  camRight.setFromMatrixColumn(camera.matrixWorld, 0);
+  camUp.setFromMatrixColumn(camera.matrixWorld, 1);
+}
+setAz(CAM_AZ);
 const post = new PixelPost(renderer, camera.near, camera.far);
 
 // Sun high on the camera's left: camera-facing sides stay lit, shadows fall right/away.
@@ -302,17 +310,6 @@ addEventListener('resize', resize);
 resize();
 
 const camTarget = new THREE.Vector3();
-// the menus turn the camera (title: a slow orbit); the game always looks from CAM_AZ
-let camAz = CAM_AZ;
-function setAz(a) {
-  camAz = a;
-  camDir.set(Math.cos(CAM_EL) * Math.cos(a), Math.sin(CAM_EL), Math.cos(CAM_EL) * Math.sin(a));
-  camera.position.copy(camDir).multiplyScalar(200);
-  camera.lookAt(0, 0, 0);
-  camera.updateMatrixWorld();
-  camRight.setFromMatrixColumn(camera.matrixWorld, 0);
-  camUp.setFromMatrixColumn(camera.matrixWorld, 1);
-}
 function updateCamera(dt, snapNow) {
   const p = me || { x: 6, z: 6, h: 0, speed: 0 }; // old select panel: aim below the row so ships sit above the cards
   // a menu screen frames the scene behind it: { orbit } the three ships turning, { ship, side } one of them on the left (-1) or right (1), else the open sea
@@ -484,10 +481,12 @@ function startWave(k) {
   const [from, to] = route();
   banner(convoy ? `CONVOY ${k} · ${from.name} → ${to.name}` : rebuilt ? `WAVE ${k} · THE FORT IS REBUILT` : fortActive(k) && k === 3 ? `WAVE ${k} · THE FORT OPENS FIRE` : `WAVE ${k}`);
 }
-const statBars = (s) => [
+// a ship's six stats against the best of the three (1 = the top of its gauge)
+const shipStats = (s) => [
   ['SPEED', s.maxSpeed / 14], ['HANDLING', s.turn / 1.4], ['HULL', s.maxHp / 150],
   ['GUNS', s.cannons / 6], ['RELOAD', 2.4 / s.reloadTime], ['CREW', s.maxCrew / 50],
-].map(([k, v]) => `<span>${k}</span><div class="bar"><i style="width:${Math.round(v * 100)}%"></i></div>`).join('');
+];
+const statBars = (s) => shipStats(s).map(([k, v]) => `<span>${k}</span><div class="bar"><i style="width:${Math.round(v * 100)}%"></i></div>`).join('');
 $('select-list').innerHTML = PREVIEW.map((s, i) =>
   `<div class="card"><kbd>${i + 1}</kbd><b>${s.name.toUpperCase()}</b><span class="blurb">${PLAYER_SHIPS[i].blurb}</span><div class="stats">${statBars(s)}</div>` +
   `<div class="kit">${s.skills.map((k) => `<img src="${ICON[k.id]}">${SKILLS[k.id].name}`).join('<br>')}</div></div>`).join('');
@@ -1514,9 +1513,11 @@ $('quick-pvp').onclick = (e) => { e.currentTarget.blur(); quickGame('pvp'); };
 
 // --- menus (ui.js, screens.js): what the game lends them -----------------------------
 initScreens({
-  ships: PREVIEW.map((s, i) => ({ name: s.name.toUpperCase(), blurb: PLAYER_SHIPS[i].blurb.toUpperCase() })),
+  ships: PREVIEW.map((s, i) => ({ name: s.name.toUpperCase(), blurb: PLAYER_SHIPS[i].blurb.toUpperCase(),
+    gauges: shipStats(s).map(([, v]) => Math.round(v * 10)), skills: s.skills.map((k) => ({ name: SKILLS[k.id].name.toUpperCase(), icon: ICON[k.id] })) })),
   unlock,
   muteLabel: () => 'M',
+  setMode: (m) => setConvoy(m === 'convoy'), // its map shows behind the ship screen
   startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); },
   oldPanel: () => ui.reset(),
 });
@@ -1525,6 +1526,7 @@ ui.setOnChange(() => document.body.classList.toggle('menus', ui.active()));
 let boot = null;
 try { boot = sessionStorage.getItem('broadside.boot'); sessionStorage.removeItem('broadside.boot'); } catch {}
 if (!store.name || !boot) ui.open('title');
+else if (boot === 'ship') ui.reset('menu', 'solo-mode', 'ship');
 else ui.reset('menu');
 updateCamera(0, true);
 // headless hooks: advance the sim deterministically without waiting for rAF
