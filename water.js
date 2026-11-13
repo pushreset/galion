@@ -65,9 +65,20 @@ vec3 seaColor(vec2 p, float t) {
   if (sd < 0.6 + 0.35 * sin(t * 2.0 + p.x * 0.4)) foam = true;
   if (abs(sd - (1.2 + roll * 3.0)) < 0.22 && noise(p * 0.7) > 0.35 + roll * 0.4) foam = true;
 
-  // Outside the arena: darker water so the edge reads.
-  float edge = max(abs(p.x) - uArena.x, abs(p.y) - uArena.y);
-  if (edge > 0.0) k -= 1 + int(edge > 10.0);
+  // The sea stops at the arena edge: an old chart's neatline (ink rules around a graduated scale bar),
+  // a parchment margin, then the gaming table the chart lies on.
+  vec2 e = abs(p) - uArena;
+  float edge = max(e.x, e.y);
+  if (edge > 0.0) {
+    vec3 ink = srgb(43., 26., 16.), paper = fbm(p * 0.06) > 0.55 ? srgb(230., 204., 142.) : srgb(246., 230., 180.);
+    if (edge < 0.7 || (edge > 2.3 && edge < 3.0) || (edge > 4.2 && edge < 4.8)) return ink;
+    if (edge < 2.3) return min(e.x, e.y) < 0.0 && mod(floor((e.x > e.y ? p.y : p.x) / 5.0), 2.0) < 1.0 ? ink : paper;
+    if (edge < 16.0) return paper;
+    if (edge < 17.5) return srgb(27., 17., 11.); // the sheet's shadow
+    float plank = floor(p.y / 9.0);
+    if (fract(p.y / 9.0) < 0.06 || fract((p.x + hash(vec2(plank, 1.0)) * 60.0) / 60.0) < 0.01) return ink; // seams
+    return hash(vec2(plank, 7.0)) > 0.5 ? srgb(86., 53., 31.) : srgb(63., 38., 22.);
+  }
 
   return foam ? srgb(244., 255., 251.) : ramp(k);
 }
