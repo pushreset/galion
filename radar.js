@@ -26,8 +26,9 @@ function drawRose() {
   // star points: each split into a light and a dark half, like engraved roses
   const point = (a, len, w, light, dark) => {
     const tip = [C + Math.cos(a) * len, C + Math.sin(a) * len];
-    const l = [C + Math.cos(a - Math.PI / 2) * w, C + Math.sin(a - Math.PI / 2) * w];
-    const r = [C + Math.cos(a + Math.PI / 2) * w, C + Math.sin(a + Math.PI / 2) * w];
+    // shoulders on the bisectors between two points: neighbours meet there instead of overlapping into a pinwheel
+    const l = [C + Math.cos(a - Math.PI / 4) * w, C + Math.sin(a - Math.PI / 4) * w];
+    const r = [C + Math.cos(a + Math.PI / 4) * w, C + Math.sin(a + Math.PI / 4) * w];
     for (const [side, col] of [[l, light], [r, dark]]) {
       g.fillStyle = col;
       g.beginPath();
