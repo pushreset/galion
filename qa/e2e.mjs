@@ -14,7 +14,7 @@ async function open(name, boot = 'online', captain = 'ANNE') {
   const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_|CORS/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
-  await page.addInitScript(([boot, captain]) => { localStorage.setItem('broadside.name', JSON.stringify(captain)); sessionStorage.setItem('broadside.boot', boot); }, [boot, captain]);
+  await page.addInitScript(([boot, captain]) => { localStorage.setItem('broadside.name', JSON.stringify(captain)); localStorage.setItem('broadside.lang', '"en"'); sessionStorage.setItem('broadside.boot', boot); }, [boot, captain]);
   await page.goto(URL, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
   await page.evaluate(() => { // log every sound this page plays

@@ -8,6 +8,7 @@ import { sfx, unlock, setAudio, setPaused, setCombat } from './sfx.js';
 import { hostRoom, joinRoom, match, worldScores, MAX_PLAYERS } from './net.js';
 import * as ui from './ui.js';
 import { initScreens } from './screens.js';
+import { t, tk, say, lang } from './i18n.js';
 import { store, SHIPS, DEFAULT_KEYS, cleanName, boardOf, normRow, signLocal, markWorld } from './store.js';
 // loudness + stereo pan of a world point relative to the local player (screen-right = (dx - dz)/√2)
 function ear(x, z) {
@@ -15,7 +16,7 @@ function ear(x, z) {
   return [Math.max(0, 1 - Math.hypot(dx, dz) / 110), (dx - dz) / Math.SQRT2 / 50];
 }
 import { createRadar } from './radar.js';
-import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, SLAM, WIND } from './sim.js';
+import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, UPGRADES, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, SLAM, WIND } from './sim.js';
 
 const VIEW_H = 40; // world units visible vertically
 const TARGET_PX_H = 300; // internal render height ≈ this; integer upscale to the screen
@@ -87,7 +88,7 @@ const fx = createFx(scene, wakes);
 // flashes, popups, placed sounds) as events for guests; everything else guests read from the snapshot itself.
 // convoy: co-op / solo variant on its own map (sim.js MAPS.convoy): hunt escorted merchants sailing port to port.
 let convoy = false;
-const modeName = () => (mode === 'pvp' ? 'PVP' : convoy ? 'CONVOY' : 'CO-OP');
+const modeName = () => (mode === 'pvp' ? 'PVP' : convoy ? t('CONVOY') : t('CO-OP'));
 let net = 'solo', mode = 'coop', room = null, myPid = 0, roomOpen = false; // roomOpen: the host's room got its code
 // quick match: the server queue this room came from ('pvp' | 'coop-waves' | 'coop-convoy'), the host's countdown end, attempts so far
 let quick = null, quickAt = null, quickTries = 0, quickBeat = 0;
@@ -176,7 +177,7 @@ function fortDown(fort) {
   sound('sink', fort.x, fort.z);
   sound('boom', fort.x, fort.z);
   shake = Math.max(shake, 0.5);
-  banner(gold ? `FORT DESTROYED · +${gold} GOLD` : 'FORT DESTROYED', 2.5);
+  banner(gold ? [tk('FORT DESTROYED · +{0} GOLD'), gold] : [tk('FORT DESTROYED')], 2.5);
 }
 function fortUp(fort) {
   Object.assign(fort, { hp: fort.maxHp, alive: true });
@@ -198,12 +199,15 @@ function rekey() {
   if (keys.mute === DEFAULT_KEYS.mute && m && !Object.values(keys).includes(m)) keys.mute = m;
   actionOf = Object.fromEntries(Object.entries(keys).map(([a, c]) => [c, a]));
   const k = (a) => `<kbd>${ui.esc(ui.keyLabel(keys[a]))}</kbd>`;
-  $('help').innerHTML = `${k('sailUp')}/${k('sailDown')} sail up/down · ${k('turnLeft')}/${k('turnRight')} turn · ${k('firePort')} fire left · ${k('fireStarboard')} fire right · ${k('skill1')}-${k('skill4')} skills · ${k('board')} board · ${k('mute')} sound · ${k('overview')} zoom · ${k('pause')} pause`;
+  $('help').innerHTML = `${k('sailUp')}/${k('sailDown')} ${t('sail up/down')} · ${k('turnLeft')}/${k('turnRight')} ${t('turn')} · ${k('firePort')} ${t('fire left')} · ${k('fireStarboard')} ${t('fire right')} · ${k('skill1')}-${k('skill4')} ${t('skills')} · ${k('board')} ${t('board')} · ${k('mute')} ${t('sound')} · ${k('overview')} ${t('zoom')} · ${k('pause')} ${t('pause')}`;
   $('help').hidden = !store.display.hints;
   $('k-port').textContent = ui.keyLabel(keys.firePort);
   $('k-star').textContent = ui.keyLabel(keys.fireStarboard);
   $('k-board').textContent = ui.keyLabel(keys.board);
-  $('cards-h').textContent = `Refit your ship: click or press ${ui.keyLabel(keys.skill1)}, ${ui.keyLabel(keys.skill2)} or ${ui.keyLabel(keys.skill3)}`;
+  $('cards-h').textContent = t('Refit your ship: click or press {0}, {1} or {2}', ui.keyLabel(keys.skill1), ui.keyLabel(keys.skill2), ui.keyLabel(keys.skill3));
+  // the HUD's fixed labels (index.html data-t: the English text), in the player's language
+  document.documentElement.lang = lang;
+  for (const el of document.querySelectorAll('[data-t]')) el.textContent = t(el.dataset.t);
   skillSig = cardSig = ''; // their key labels are redrawn
 }
 // a numpad digit bound on its own is that action; unbound, it follows the digit row
@@ -244,7 +248,7 @@ addEventListener('keydown', (e) => {
   if (net !== 'guest') { if (me) act(me, msg); return; }
   room.send(msg);
   // a guest hears its own clicks right away, not a round trip later
-  if (msg.t === 'card' && me.cards[pick]) { banner(me.cards[pick].label.toUpperCase(), 1.6); sfx.coin(); }
+  if (msg.t === 'card' && me.cards[pick]) { banner(cardText(me, me.cards[pick].id).toUpperCase(), 1.6); sfx.coin(); }
   if (msg.t === 'skill') { const k = me?.alive && me.skills[pick]; if (k && !(me.cd[k.id] > 0)) sfx.hit(0.5, 0); }
 });
 // One player's action (local keys, or a guest's message on the host). Guest input is untrusted: clamp it.
@@ -432,9 +436,10 @@ function hostTicker() {
 }
 // --- waves -------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
+// text: [key, ...params] (i18n.js say: the host's banner reaches every guest, who reads it in their own language) or plain text.
 // local: only on this screen (a host's own pick must not ride the snapshot to every guest)
 function banner(text, dur = 2.5, local = false) {
-  $('banner').textContent = text;
+  $('banner').textContent = say(text);
   state.bannerText = local ? '' : text;
   state.banner = dur;
 }
@@ -482,7 +487,7 @@ function spawnMerchant(m) {
   const h = Math.atan2(dest.z - z, dest.x - x);
   addShip(m.type, 'merchant', 2, x, z, h, 2, makeMerchant(m.type, x, z, h, m.armed, dest));
   if (m.escort) addShip('brig', 'navy', 1, x - Math.sin(h) * 9, z + Math.cos(h) * 9, h, 2);
-  if (mode !== 'pvp' || state.banner <= 0) banner(m.escort ? 'CONVOY SIGHTED' : m.armed ? 'ARMED MERCHANT SIGHTED' : 'MERCHANT SIGHTED', 1.6); // PvP: never over the match result
+  if (mode !== 'pvp' || state.banner <= 0) banner([m.escort ? tk('CONVOY SIGHTED') : m.armed ? tk('ARMED MERCHANT SIGHTED') : tk('MERCHANT SIGHTED')], 1.6); // PvP: never over the match result
 }
 function startWave(k) {
   state.wave = k;
@@ -498,7 +503,7 @@ function startWave(k) {
   let rebuilt = false;
   for (const f of forts) if (!f.alive && k >= f.backAt) { fortUp(f); rebuilt = true; }
   const [from, to] = route();
-  banner(convoy ? `CONVOY ${k} · ${from.name} → ${to.name}` : rebuilt ? `WAVE ${k} · THE FORT IS REBUILT` : fortActive(k) && k === 3 ? `WAVE ${k} · THE FORT OPENS FIRE` : `WAVE ${k}`);
+  banner(convoy ? [tk('CONVOY {0} · {1} → {2}'), k, from.name, to.name] : [rebuilt ? tk('WAVE {0} · THE FORT IS REBUILT') : fortActive(k) && k === 3 ? tk('WAVE {0} · THE FORT OPENS FIRE') : tk('WAVE {0}'), k]);
 }
 // a ship's six stats against the best of the three (1 = the top of its gauge)
 const shipStats = (s) => [
@@ -533,17 +538,17 @@ function choosePlayer(i) {
   hideSelect();
   state.mode = 'between';
   state.t = state.nextAt = 0; // nextAt: a PvP room already ran its merchant timer in the lobby
-  banner(me.name.toUpperCase() + ' SETS SAIL', 2, true);
+  banner([tk('{0} SETS SAIL'), me.name.toUpperCase()], 2, true);
 }
 // a guest's ship (at the start, or for one who joins a run under way): co-op drops them beside a crewmate, PvP somewhere safe
 function addPlayer(pid, i, name) {
   if (players.some((p) => p.pid === pid) || !PLAYER_SHIPS[i]) return;
-  if (state.mode === 'dead') return banner('THIS RUN IS OVER', 3); // no ship: a latecomer must not sign a score for it
+  if (state.mode === 'dead') return banner([tk('THIS RUN IS OVER')], 3); // no ship: a latecomer must not sign a score for it
   const p = makePirate(makePlayer(i), pid, i, name);
   addShip(p.type, 'pirate', p.team, 0, 0, 0, 0, p);
   players.push(p);
   respawn(p, 1);
-  banner(`${p.tag} JOINS · ${p.name.toUpperCase()}`, 2);
+  banner([tk('{0} JOINS · {1}'), p.tag, p.name.toUpperCase()], 2);
 }
 function respawn(p, hpFrac) {
   const a = mode === 'coop' && anyAlive(p);
@@ -563,10 +568,11 @@ function respawn(p, hpFrac) {
 function choose(p, i) {
   const c = p.cards[i];
   if (!c) return;
+  const label = cardText(p, c.id); // before the upgrade: a level-up card names the level it gives
   applyUpgrade(p, c.id);
   if (c.id === 'cannons') setGuns(p.mesh, p.cannons);
   p.cards = [];
-  if (p === me) { banner(c.label.toUpperCase(), 1.6, true); sfx.coin(); }
+  if (p === me) { banner(label.toUpperCase(), 1.6, true); sfx.coin(); }
 }
 const PICK_TIME = 22; // s since the lull began (cards show at 2.2)
 // host only, online: sets sail for wave 1 (co-op) or starts / restarts the PvP match
@@ -584,7 +590,7 @@ function hostStart() {
     setGuns(p.mesh, p.cannons);
     respawn(p, 1);
   }
-  banner('FIRST TO 10 SINKINGS', 2.5);
+  banner([tk('FIRST TO 10 SINKINGS')], 2.5);
   sfx.bell();
 }
 function flow(dt) {
@@ -626,7 +632,7 @@ function flow(dt) {
       p.repair = p.maxHp * 0.6; // patch up to 60% of the hull per break, a bit each frame
       p.crew = Math.min(p.maxCrew, p.crew + p.maxCrew * 0.3); // recruits between waves
     }
-    banner(convoy ? `${state.convoyN - state.port} TAKEN · ${state.port} MADE PORT${state.port ? ' · ESCORT REINFORCED' : ''}` : 'WAVE CLEARED · REPAIRS', convoy ? 3 : 2);
+    banner(convoy ? [state.port ? tk('{0} TAKEN · {1} MADE PORT · ESCORT REINFORCED') : tk('{0} TAKEN · {1} MADE PORT'), state.convoyN - state.port, state.port] : [tk('WAVE CLEARED · REPAIRS')], convoy ? 3 : 2);
     sfx.fanfare();
   }
   for (const p of players) {
@@ -698,10 +704,10 @@ function pvpFlow(dt) {
   const [top, second] = [...players].sort((a, b) => b.kills - a.kills);
   if (!top) return;
   const tie = top.kills === second?.kills;
-  if (tie && state.left <= 0 && state.left + dt > 0) banner('SUDDEN DEATH · NEXT SINKING WINS', 3);
+  if (tie && state.left <= 0 && state.left + dt > 0) banner([tk('SUDDEN DEATH · NEXT SINKING WINS')], 3);
   if ((state.left <= 0 || top.kills >= 10) && !tie) {
     state.mode = 'over';
-    banner(`${top.tag} WINS · ${top.kills} SINKINGS`, 4);
+    banner([top.kills === 1 ? tk('{0} WINS · {1} SINKING') : tk('{0} WINS · {1} SINKINGS'), top.tag, top.kills], 4);
     sfx.fanfare();
     pvpOver();
   }
@@ -732,7 +738,7 @@ function updateEnemies(dt) {
     if (r === 'escaped') {
       s.escaped = true;
       if (convoy) { state.delivered += s.gold; state.port++; } // her cargo pays for a bigger escort next time
-      popup(s.x, s.z, convoy ? `ESCAPED · +${s.gold} NAVY GOLD` : 'ESCAPED');
+      popup(s.x, s.z, convoy ? [tk('ESCAPED · +{0} NAVY GOLD'), s.gold] : [tk('ESCAPED')]);
     }
     else if (r) fire(s, r);
   }
@@ -787,7 +793,7 @@ function spawnKraken() {
   const k = addShip('kraken', 'kraken', 3, x, z, Math.atan2(P.z - z, P.x - x), 0);
   for (let i = 0; i < 3; i++) fx.splash(k.x + Math.random() * 6 - 3, k.z + Math.random() * 6 - 3);
   sound('splash', k.x, k.z, 1.5);
-  if (mode !== 'pvp' || state.banner <= 0) banner('THE KRAKEN RISES', 2.5);
+  if (mode !== 'pvp' || state.banner <= 0) banner([tk('THE KRAKEN RISES')], 2.5);
 }
 function diveKraken() {
   for (const o of ships) if (o.type === 'kraken' && o.alive) { o.escaped = true; fx.splash(o.x, o.z); } // removed like a merchant that got away
@@ -797,7 +803,7 @@ function diveKraken() {
 function krakenSlain(k) {
   for (let i = 0; i < 4; i++) fx.splash(k.x + Math.random() * 8 - 4, k.z + Math.random() * 8 - 4);
   if (mode === 'pvp') state.krakenAt = time + 60;
-  if (mode !== 'pvp' || state.banner <= 0) banner('THE KRAKEN IS SLAIN', 2.5);
+  if (mode !== 'pvp' || state.banner <= 0) banner([tk('THE KRAKEN IS SLAIN')], 2.5);
 }
 const slams = [];
 function slamMesh() { const m = buildTentacle(); m.rotation.y = Math.random() * 6.28; scene.add(m); return m; }
@@ -851,13 +857,24 @@ function barrelMesh() {
   scene.add(g);
   return g;
 }
+// A refit card's text in this player's language, from its id (the host sends ids, never text). lvl: the level a 'lvl:' card gives.
+// An id this build does not know (a guest never trusts the host) reads as nothing.
+function cardLabel(id, lvl) {
+  const [kind, sid] = String(id).split(':'), k = Object.hasOwn(SKILLS, sid ?? '') && SKILLS[sid], u = UPGRADES.find((x) => x.id === id);
+  if (kind === 'learn' && k) return t('Learn {0}: {1}', t(k.name), t(k.desc));
+  if (kind === 'lvl' && k) return t('{0} {1}: stronger, faster cooldown', t(k.name), 'I'.repeat(Math.max(2, Math.min(3, lvl | 0))));
+  return u ? t(u.label) : '';
+}
+const cardText = (s, id) => cardLabel(id, (s.skills.find((k) => 'lvl:' + k.id === id)?.lvl || 1) + 1);
+// a floating text: plain, [key, ...params], or ['card', id, lvl] (the refit a PvP sinking gave: its title only)
+const popText = (x) => (Array.isArray(x) && x[0] === 'card' ? cardLabel(x[1], x[2]).split(':')[0].trim().toUpperCase() : say(x));
 // floating "+N" text at a world point (gold pickups)
 function popup(x, z, text, cls) {
   if (net === 'host') events.push(['pop', x, z, text, cls]);
   _p.set(x, 3, z).project(camera);
   const el = document.createElement('div');
   el.className = cls ? 'pop ' + cls : 'pop';
-  el.textContent = text;
+  el.textContent = popText(text);
   el.style.left = Math.round(((_p.x + 1) / 2) * canvas.clientWidth) + 'px';
   el.style.top = Math.round(((1 - _p.y) / 2) * canvas.clientHeight) + 'px';
   $('bars').append(el);
@@ -913,7 +930,7 @@ function endRun() {
     if (entry.wave > 0 && r.rank >= 0) { Object.assign(res, { world: r.rank, top, rank: r.rank }); markWorld(board, entry.at, r.rank + 1); }
     else if (entry.wave > 0) res.world = -1; // off the world's top 100: this browser's rows stay (wave 0 was never sent: no world rank)
     if (ui.top() === 'gameover') ui.refresh();
-  }).catch(() => ui.toast('warn', 'WORLD BOARD UNREACHABLE · SAVED ON THIS BROWSER', 5000)); // down, or it refused the run (its limit per address, its bounds)
+  }).catch(() => ui.toast('warn', t('WORLD BOARD UNREACHABLE · SAVED ON THIS BROWSER'), 5000)); // down, or it refused the run (its limit per address, its bounds)
 }
 function updateLoot(dt) {
   for (let i = loot.length - 1; i >= 0; i--) {
@@ -926,7 +943,7 @@ function updateLoot(dt) {
     if (P.alive && d < 16) { o.x += (dx / d) * 12 * dt; o.z += (dz / d) * 12 * dt; }
     const got = P.alive && d < P.len * 0.45 + 2;
     if (got || o.life <= 0) {
-      if (got && mode === 'pvp') { P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.08); popup(o.x, o.z, '+HULL'); } // PvP: cargo patches your hull
+      if (got && mode === 'pvp') { P.hp = Math.min(P.maxHp, P.hp + P.maxHp * 0.08); popup(o.x, o.z, [tk('+HULL')]); } // PvP: cargo patches your hull
       else if (got) { state.gold += o.value; popup(o.x, o.z, `+${o.value}`); }
       if (got) { fx.splash(o.x, o.z); if (P === me) sfx.coin(); }
       scene.remove(o.mesh);
@@ -964,7 +981,7 @@ function updateBalls(dt) {
       fx.hit(b.x, isFort ? 5.5 : Math.max(1, b.y), b.z);
       if (isFort && !ev.hit.alive) fortDown(ev.hit);
       sound('hit', b.x, b.z);
-      if (ev.pb && performance.now() - pbAt > 1000) { pbAt = performance.now(); popup(b.x, b.z, 'POINT BLANK'); }
+      if (ev.pb && performance.now() - pbAt > 1000) { pbAt = performance.now(); popup(b.x, b.z, [tk('POINT BLANK')]); }
       if (ev.hit === me) shake = Math.max(shake, 0.3);
     } else if (ev.land) {
       fx.hit(b.x, 1.5, b.z);
@@ -1025,13 +1042,13 @@ function step(dt) {
 }
 function pirateSunk(s) {
   s.cards = [];
-  if (mode !== 'pvp') { if (net !== 'solo') banner(`${s.tag} IS SUNK`, 2); return; }
+  if (mode !== 'pvp') { if (net !== 'solo') banner([tk('{0} IS SUNK'), s.tag], 2); return; }
   const k = players.find((p) => p !== s && p.team === s.lastHit);
-  if (!k) return banner(`${s.tag} SANK`, 2);
+  if (!k) return banner([tk('{0} SANK'), s.tag], 2);
   if (state.mode === 'pvp') k.kills++; // warm-up and post-match sinkings don't score
   const r = state.mode === 'pvp' ? rollUpgrades(k) : [], c = r[Math.floor(Math.random() * r.length)]; // each sinking refits the winner (random: slot 0 is always a skill card)
-  if (c) { applyUpgrade(k, c.id); if (c.id === 'cannons') setGuns(k.mesh, k.cannons); popup(k.x, k.z, c.label.split(':')[0].toUpperCase()); }
-  banner(`${k.tag} SANK ${s.tag}`, 2);
+  if (c) { const lvl = (k.skills.find((x) => 'lvl:' + x.id === c.id)?.lvl || 1) + 1; applyUpgrade(k, c.id); if (c.id === 'cannons') setGuns(k.mesh, k.cannons); popup(k.x, k.z, ['card', c.id, lvl]); }
+  banner([tk('{0} SANK {1}'), k.tag, s.tag], 2);
 }
 const radar = createRadar($('radar'));
 const _p = new THREE.Vector3();
@@ -1039,7 +1056,7 @@ const setHTML = (el, h) => { if (el._h !== h) el.innerHTML = el._h = h; }; // pe
 function hud() {
   $('banner').hidden = state.banner <= 0 || !!state.boarding;
   $('room').hidden = net === 'solo';
-  if (net !== 'solo') setHTML($('room'), net === 'host' ? `${quick ? 'QUICK · ' : ''}ROOM <b>${ui.esc(room.code())}</b> · ${players.length}/${MAX_PLAYERS}` : `ONLINE · ${modeName()} · ${players.length} PIRATES`);
+  if (net !== 'solo') setHTML($('room'), net === 'host' ? `${quick ? t('QUICK') + ' · ' : ''}${t('ROOM')} <b>${ui.esc(room.code())}</b> · ${players.length}/${MAX_PLAYERS}` : t('ONLINE · {0} · {1} PIRATES', modeName(), players.length));
   if (!me) return;
   const on = fortsOn(), goal = convoy && state.mode === 'fight' && route()[1];
   radar(me, ships, loot, forts.map((f) => ({ x: f.x, z: f.z, active: on && f.alive })), ISLANDS.filter((I) => I.kind === 'port').map((I) => ({ x: I.x, z: I.z, goal: I === goal })));
@@ -1052,7 +1069,7 @@ function hud() {
   }
   $('gold').textContent = state.gold;
   $('wave').textContent = state.wave;
-  $('wave-l').textContent = convoy ? 'CONVOY' : 'WAVE';
+  $('wave-l').textContent = convoy ? t('CONVOY') : t('WAVE');
   $('navy').hidden = !convoy;
   $('delivered').textContent = state.delivered;
   $('combo').hidden = combo.n < 2;
@@ -1078,7 +1095,7 @@ function hud() {
     s.bar.firstChild.style.width = (s.hp / s.maxHp) * 100 + '%';
   }
   $('sail').style.width = (me.sail / 3) * 100 + '%';
-  $('kn').textContent = Math.round(me.speed) + ' KN'; // 1 unit/s reads as 1 knot
+  $('kn').textContent = Math.round(me.speed) + ' ' + t('KN'); // 1 unit/s reads as 1 knot
   $('hp').style.width = (me.hp / me.maxHp) * 100 + '%';
   $('hp').classList.toggle('fix', !!me.fix);
   const rt = me.reloadTime * crewMul(me);
@@ -1091,14 +1108,14 @@ function hud() {
   $('board-hint').hidden = !bt;
   if (bt) {
     _p.set(bt.x, bt.len * 0.95, bt.z).project(camera);
-    $('board-hint').textContent = `${ui.keyLabel(keys.board)} · BOARD${bt.hp < 0.2 * bt.maxHp ? ' (AUTO)' : ''}`;
+    $('board-hint').textContent = `${ui.keyLabel(keys.board)} · ${bt.hp < 0.2 * bt.maxHp ? t('BOARD (AUTO)') : t('BOARD')}`;
     $('board-hint').style.transform = `translate(${Math.round(((_p.x + 1) / 2) * W)}px, ${Math.round(((1 - _p.y) / 2) * H) - 46}px) translateX(-50%)`;
   }
   // refit cards: each pirate picks their own
   const cards = me.cards || [], csig = cards.map((c) => c.id).join();
   if (csig !== cardSig) {
     cardSig = csig;
-    $('cards-list').innerHTML = cards.map((c, i) => `<div class="card"><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${c.label}</span></div>`).join('');
+    $('cards-list').innerHTML = cards.map((c, i) => `<div class="card"><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd>${c.id.includes(':') ? `<img class="icon" src="${ICON[c.id.split(':')[1]]}">` : ''}<span>${ui.esc(cardText(me, c.id))}</span></div>`).join('');
   }
   $('cards').hidden = !cards.length || state.mode === 'dead';
   skillHud();
@@ -1120,7 +1137,7 @@ function tryBoard(p) {
   const b = startBoarding(p, e);
   if (b.auto) return capture(p, e, null);
   if (net !== 'solo') return;
-  state.boarding = { e, b, scale: Math.max(b.you, b.them), msg: 'GRAPPLES OUT!', result: null, endT: 0 };
+  state.boarding = { e, b, scale: Math.max(b.you, b.them), msg: t('GRAPPLES OUT!'), result: null, endT: 0 };
   newRound();
   $('boarding').hidden = false;
   sfx.hit(0.8, 0);
@@ -1137,7 +1154,7 @@ function boardPress() {
 function resolveRound(q) {
   const B = state.boarding, you0 = B.b.you, them0 = B.b.them;
   const r = boardRound(B.b, q);
-  B.msg = q > 0 ? `${q > 0.8 ? 'PERFECT' : 'HIT'}! -${Math.round(them0 - B.b.them)} DEFENDERS` : `MISSED! -${Math.round(you0 - B.b.you)} CREW`;
+  B.msg = q > 0 ? t(q > 0.8 ? tk('PERFECT! -{0} DEFENDERS') : tk('HIT! -{0} DEFENDERS'), Math.round(them0 - B.b.them)) : t('MISSED! -{0} CREW', Math.round(you0 - B.b.you));
   sfx.hit(q > 0 ? 0.4 + q * 0.6 : 0.5, 0);
   if (!r) return newRound();
   B.result = r;
@@ -1155,7 +1172,7 @@ function updateBoarding(dt) {
     if ((B.timer -= dt) <= 0) resolveRound(0);
   }
   const b = B.b;
-  $('b-title').textContent = B.result === 'won' ? 'THEY SURRENDER!' : B.result === 'lost' ? 'REPELLED!' : 'BOARDING!';
+  $('b-title').textContent = B.result === 'won' ? t('THEY SURRENDER!') : B.result === 'lost' ? t('REPELLED!') : t('BOARDING!');
   $('b-you').style.width = Math.max(0, b.you / B.scale) * 100 + '%';
   $('b-them').style.width = Math.max(0, b.them / B.scale) * 100 + '%';
   $('b-youn').textContent = Math.max(0, Math.ceil(b.you));
@@ -1176,7 +1193,7 @@ function endBoarding() {
   me.boardCd = 6;
   const dx = e.x - me.x, dz = e.z - me.z, d = Math.hypot(dx, dz) || 1;
   e.x += (dx / d) * 6; e.z += (dz / d) * 6; // cut loose
-  banner('REPELLED', 1.5);
+  banner([tk('REPELLED')], 1.5);
 }
 function capture(p, e, b) {
   const r = captureReward(p, e, b);
@@ -1184,12 +1201,12 @@ function capture(p, e, b) {
   p.crew += r.crew;
   p.hp += r.heal;
   p.boardCd = 2;
-  if (r.crew >= 1) popup(p.x, p.z, `+${r.crew} CREW`);
+  if (r.crew >= 1) popup(p.x, p.z, [tk('+{0} CREW'), r.crew]);
   e.wrecked = true; // plunder paid directly: no barrels on top
   damage(e, 1e9);
   sound('sink', e.x, e.z);
   if (p === me) sfx.coin();
-  banner(`${e.merchant ? 'MERCHANT' : 'SHIP'} CAPTURED${b ? '' : ' · STRUCK HER COLOURS'}`, 2);
+  banner([e.merchant ? (b ? tk('MERCHANT CAPTURED') : tk('MERCHANT CAPTURED · STRUCK HER COLOURS')) : b ? tk('SHIP CAPTURED') : tk('SHIP CAPTURED · STRUCK HER COLOURS')], 2);
 }
 
 // skill bar: rebuilt when skills change (learn / level up), cooldown overlay + armed border every frame
@@ -1201,8 +1218,8 @@ function skillHud() {
     $('skills').innerHTML = [0, 1, 2, 3].map((i) => {
       const k = me.skills[i];
       return k
-        ? `<div class="slot"><img src="${ICON[k.id]}"><i class="cd"></i><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><em>${'I'.repeat(k.lvl)}</em><span>${SKILLS[k.id].name}</span></div>`
-        : `<div class="slot locked"><b>?</b><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><span>locked</span></div>`;
+        ? `<div class="slot"><img src="${ICON[k.id]}"><i class="cd"></i><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><em>${'I'.repeat(k.lvl)}</em><span>${t(SKILLS[k.id].name)}</span></div>`
+        : `<div class="slot locked"><b>?</b><kbd>${ui.esc(ui.keyLabel(keys['skill' + (i + 1)]))}</kbd><span>${t('locked')}</span></div>`;
     }).join('');
   }
   me.skills.forEach((k, i) => {
@@ -1299,7 +1316,7 @@ function applySnap(m) {
     if (!s) continue;
     // host strings end up in innerHTML (scoreboard, cards, leaderboard): a guest never trusts them
     Object.assign(e, { tag: nick(e.tag) || 'P' + ((e.pid | 0) + 1), name: ui.esc(e.name), kills: +e.kills || 0,
-      cards: (e.cards || []).map((c) => ({ id: String(c.id), label: ui.esc(c.label) })),
+      cards: (e.cards || []).map((c) => ({ id: String(c.id) })).filter((c) => cardLabel(c.id)),
       skills: (e.skills || []).filter((k) => Object.hasOwn(SKILLS, k.id)).slice(0, 4).map((k) => ({ id: k.id, lvl: Math.max(1, Math.min(3, k.lvl | 0)) })),
       cd: e.cd || {}, reload: e.reload || { port: 0, star: 0 } }); // a bad value here would throw in hud() and stop the frame loop
     players.push(Object.assign(s, e));
@@ -1324,8 +1341,9 @@ function applySnap(m) {
   if (Number.isFinite(g.wind) && g.wind !== WIND.a) setWind(g.wind);
   [combo.n, combo.t] = g.combo;
   combo.best = Math.max(combo.best, combo.n);
-  if (g.banner && g.banner !== lastBanner) banner(g.banner, g.bt);
-  lastBanner = g.banner;
+  const bsig = JSON.stringify(g.banner); // [key, ...params]: a new array in every snapshot
+  if (g.banner && bsig !== lastBanner) banner(g.banner, g.bt);
+  lastBanner = bsig;
   if (was !== state.mode && state.mode === 'fight') sfx.bell();
   if (was !== state.mode && (state.mode === 'lull' || state.mode === 'over')) sfx.fanfare();
   if (was !== state.mode && state.mode === 'over') pvpOver();
@@ -1351,7 +1369,7 @@ function guestStep(dt) {
   if (state.banner > 0) state.banner -= dt;
   if (guestShip !== null) sendInput();
   // the host pings even with its tab hidden, so the link stays up while the game stalls: say so
-  if (guestShip !== null && !hostGone && performance.now() - snapAt > 1500) banner('WAITING FOR THE HOST…', 0.5);
+  if (guestShip !== null && !hostGone && performance.now() - snapAt > 1500) banner([tk('WAITING FOR THE HOST…')], 0.5);
   const a = Math.min(1, (performance.now() - snapAt) / snapGap);
   for (const s of ships) { if (s._b) mix(s, SK, a); syncShip(s, time, dt); }
   for (const b of flying) mix(b, BK, a);
@@ -1380,7 +1398,7 @@ const LOBBY_MODES = ['waves', 'convoy', 'pvp'];
 const shipIdx = (v) => ([0, 1, 2].includes(v) ? v : null);
 const lastIdx = () => SHIPS.indexOf(store.lastShip);
 const hub = () => { if (ui.top() === 'online') ui.refresh(); };
-const noPeer = () => typeof Peer === 'undefined' && (ui.toast('error', 'ONLINE UNAVAILABLE · SOLO STILL WORKS'), hub(), true);
+const noPeer = () => typeof Peer === 'undefined' && (ui.toast('error', t('ONLINE UNAVAILABLE · SOLO STILL WORKS')), hub(), true);
 function online(what) {
   if (net !== 'solo' || state.mode !== 'select' || noPeer()) return false;
   busy = what;
@@ -1403,13 +1421,13 @@ function quickGame(q, skip = '', tries = 0) {
   if (net !== 'solo' || state.mode !== 'select' || noPeer()) return;
   quick = q; // offline() clears it: an answer that comes back after the player gave up is dropped
   busy = 'q-' + q;
-  ui.toast('wait', 'SEARCHING…', 0);
+  ui.toast('wait', t('SEARCHING…'), 0);
   hub();
   match(q, skip && `&skip=${skip}`).catch(() => null).then((r) => { // only the lookup is caught: a bug in hostGame / joinGame must reach the console
     if (quick !== q || net !== 'solo') return;
     if (r?.retry) return setTimeout(() => quick === q && net === 'solo' && quickGame(q, '', tries), 1000); // a room is opening: join it once its host is reachable
     const code = r?.host || r?.join;
-    if (!/^[A-Z]{4}$/.test(code)) return offline('MATCHMAKING UNREACHABLE'); // no answer, an old service build, or not our service: the code reaches innerHTML
+    if (!/^[A-Z]{4}$/.test(code)) return offline(t('MATCHMAKING UNREACHABLE')); // no answer, an old service build, or not our service: the code reaches innerHTML
     quickTries = tries;
     if (r.host) hostGame(q === 'pvp' ? 'pvp' : q.slice(5), code); else joinGame(code);
   });
@@ -1417,7 +1435,7 @@ function quickGame(q, skip = '', tries = 0) {
 // a quick room that could not be hosted or joined: ask again, telling the server to drop that one
 function retryQuick(skip) {
   const q = quick, n = quickTries + 1;
-  offline(n < 3 ? '' : 'NO MATCH FOUND · TRY AGAIN', 'warn');
+  offline(n < 3 ? '' : t('NO MATCH FOUND · TRY AGAIN'), 'warn');
   if (n < 3) quickGame(q, skip, n);
 }
 // waves or convoy: each has its map
@@ -1483,7 +1501,7 @@ function onLobby(m) {
   const was = lobby;
   const list = (Array.isArray(m.players) ? m.players : []).slice(0, MAX_PLAYERS).map((p) => ({ pid: p?.pid | 0, name: nick(p?.name) || 'P' + ((p?.pid | 0) + 1), ship: shipIdx(p?.ship), ready: !!p?.ready }));
   lobby = { code: /^[A-Z]{4}$/.test(m.code) ? m.code : '', quick: !!m.quick, mode: LOBBY_MODES.includes(m.mode) ? m.mode : 'waves', countdown: Number.isFinite(m.countdown) ? m.countdown | 0 : null, started: !!m.started, players: list };
-  for (const p of was?.players || []) if (!list.some((o) => o.pid === p.pid)) ui.toast('warn', `${p.name} LEFT`);
+  for (const p of was?.players || []) if (!list.some((o) => o.pid === p.pid)) ui.toast('warn', t('{0} LEFT', p.name));
   if (guestShip !== null) return; // at sea already
   setLobbyMode(lobby.mode);
   const p = myLine();
@@ -1498,7 +1516,7 @@ function onLobby(m) {
   busy = '';
   ui.clearToasts();
   ui.reset('menu', 'online', 'lobby');
-  ui.toast('ok', `JOINED ${lobby.mode === 'pvp' ? 'PVP' : 'CO-OP'} · PICK YOUR SHIP`);
+  ui.toast('ok', lobby.mode === 'pvp' ? t('JOINED PVP · PICK YOUR SHIP') : t('JOINED CO-OP · PICK YOUR SHIP'));
 }
 // m: the lobby's mode at first (the host changes it inside a private room). code: a quick-match room's, handed out by the server
 function hostGame(m, code) {
@@ -1507,7 +1525,7 @@ function hostGame(m, code) {
   hostTicker();
   setLobbyMode(m);
   for (const s of PREVIEW) if (ships.includes(s)) ships.splice(ships.indexOf(s), 1); // still on screen, but out of the sim until the start
-  ui.toast('wait', 'OPENING ROOM…', 0);
+  ui.toast('wait', t('OPENING ROOM…'), 0);
   room = hostRoom({
     open: (code) => {
       roomOpen = true;
@@ -1524,7 +1542,7 @@ function hostGame(m, code) {
     },
     join: (pid) => {
       room.send(pid, { t: 'hi', pid });
-      if (document.hidden) { document.title = 'A PIRATE JOINED · COME BACK'; sfx.bell(); } // the game goes on without its host's eyes (hostTicker), but not without its ship
+      if (document.hidden) { document.title = t('A PIRATE JOINED · COME BACK'); sfx.bell(); } // the game goes on without its host's eyes (hostTicker), but not without its ship
     },
     msg: (pid, msg) => {
       if (msg.t === 'me') return lobbyMe(pid, msg);
@@ -1533,7 +1551,7 @@ function hostGame(m, code) {
     },
     leave: (pid) => {
       const l = lobby.players.find((o) => o.pid === pid);
-      if (l) { lobby.players.splice(lobby.players.indexOf(l), 1); ui.toast('warn', `${l.name} LEFT`); lobbySync(); } // guests read it off the lobby
+      if (l) { lobby.players.splice(lobby.players.indexOf(l), 1); ui.toast('warn', t('{0} LEFT', l.name)); lobbySync(); } // guests read it off the lobby
       const p = players.find((o) => o.pid === pid);
       if (!p) return;
       players.splice(players.indexOf(p), 1);
@@ -1543,16 +1561,16 @@ function hostGame(m, code) {
     error: (e) => {
       if (roomOpen) return;
       if (quick && e.type === 'unavailable-id') return retryQuick(code); // the code is someone's private room
-      offline('COULD NOT OPEN A ROOM');
+      offline(t('COULD NOT OPEN A ROOM'));
     },
   }, code);
 }
 function joinGame(code) {
-  if (!/^[A-Z]{4}$/.test(code)) { codeErr = 'ENTER THE 4-LETTER ROOM CODE.'; return hub(); }
+  if (!/^[A-Z]{4}$/.test(code)) { codeErr = t('ENTER THE 4-LETTER ROOM CODE.'); return hub(); }
   if (!online(quick ? 'q-' + quick : 'join')) return;
   net = 'guest';
   hostGone = false;
-  ui.toast('wait', 'CONNECTING…', 0);
+  ui.toast('wait', t('CONNECTING…'), 0);
   room = joinRoom(code, {
     open: () => {},
     msg: (m) => {
@@ -1561,24 +1579,24 @@ function joinGame(code) {
       else if (m.s && guestShip !== null) applySnap(m);
     },
     close: () => {
-      if (!myPid) return quick ? retryQuick(code) : offline('ROOM FULL, CLOSED OR UNREACHABLE');
+      if (!myPid) return quick ? retryQuick(code) : offline(t('ROOM FULL, CLOSED OR UNREACHABLE'));
       hostGone = true;
       if (guestShip === null) { // in the lobby
-        const cap = lobby?.players[0]?.name || 'THE CAPTAIN';
+        const cap = lobby?.players[0]?.name || t('THE CAPTAIN');
         offline();
-        ui.modal({ title: 'HOST LEFT', text: `${cap} LEFT THE ROOM. THE CREW IS DISBANDED.`, buttons: [{ label: 'FIND A NEW CREW', cancel: true }, { label: 'MAIN MENU', run: () => ui.reset('menu') }] });
+        ui.modal({ title: t('HOST LEFT'), text: t('{0} LEFT THE ROOM. THE CREW IS DISBANDED.', cap), buttons: [{ label: t('FIND A NEW CREW'), cancel: true }, { label: t('MAIN MENU'), run: () => ui.reset('menu') }] });
         return;
       }
       if (state.mode === 'dead') { state.t = Math.max(state.t, 3.1); return; } // run over: the end screen stays, the run is signed
-      ui.toast('error', 'HOST LEFT', 3000);
+      ui.toast('error', t('HOST LEFT'), 3000);
       setTimeout(() => reboot('online'), 3000);
     },
     error: (e) => {
       if (myPid) return;
       if (quick) return retryQuick(code);
       offline();
-      if (e.type === 'peer-unavailable') { codeErr = 'ROOM NOT FOUND. CHECK THE CODE WITH YOUR CAPTAIN.'; return hub(); }
-      ui.modal({ title: 'CONNECTION FAILED', text: 'THE ROOM CAN NOT BE REACHED.', buttons: [{ label: 'RETRY', run: () => joinGame(code) }, { label: 'MAIN MENU', cancel: true, run: () => ui.reset('menu') }] });
+      if (e.type === 'peer-unavailable') { codeErr = t('ROOM NOT FOUND. CHECK THE CODE WITH YOUR CAPTAIN.'); return hub(); }
+      ui.modal({ title: t('CONNECTION FAILED'), text: t('THE ROOM CAN NOT BE REACHED.'), buttons: [{ label: t('RETRY'), run: () => joinGame(code) }, { label: t('MAIN MENU'), cancel: true, run: () => ui.reset('menu') }] });
     },
   });
 }
@@ -1587,7 +1605,7 @@ function pvpOver() {
   if (!me) return;
   held.clear();
   const rows = [...players].sort((a, b) => b.kills - a.kills).map((p) => ({ name: p.tag, ship: String(p.name).toUpperCase(), kills: p.kills, you: p === me }));
-  ui.open('pvpover', { rows, won: rows[0].you, host: net === 'host', captain: lobby?.players[0]?.name || 'THE CAPTAIN' });
+  ui.open('pvpover', { rows, won: rows[0].you, host: net === 'host', captain: lobby?.players[0]?.name || t('THE CAPTAIN') });
 }
 // a ship's picture for the lobby's seats: the scene drawn small with her alone, once
 const thumbs = [];
@@ -1610,8 +1628,8 @@ function thumb(i) {
 
 // --- menus (ui.js, screens.js): what the game lends them -----------------------------
 initScreens({
-  ships: PREVIEW.map((s, i) => ({ name: s.name.toUpperCase(), blurb: PLAYER_SHIPS[i].blurb.toUpperCase(),
-    gauges: shipStats(s).map(([, v]) => Math.round(v * 10)), skills: s.skills.map((k) => ({ name: SKILLS[k.id].name.toUpperCase(), icon: ICON[k.id] })) })),
+  ships: PREVIEW.map((s, i) => ({ name: s.name.toUpperCase(), blurb: PLAYER_SHIPS[i].blurb, // blurb and skill names: English keys, the menus translate them
+    gauges: shipStats(s).map(([, v]) => Math.round(v * 10)), skills: s.skills.map((k) => ({ name: SKILLS[k.id].name, icon: ICON[k.id] })) })),
   unlock, setAudio, rekey,
   keys: () => keys,
   muteLabel: () => ui.keyLabel(keys.mute),

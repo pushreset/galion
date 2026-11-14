@@ -21,6 +21,7 @@ async function open(name, { w = 960, h = 540, dpr = 1, store = {}, boot } = {}) 
   await page.addInitScript(([store, boot]) => {
     if (sessionStorage.getItem('qa')) return; // a reload keeps what the game stored
     sessionStorage.setItem('qa', 1);
+    localStorage.setItem('broadside.lang', '"en"'); // the assertions below read English
     for (const k in store) localStorage.setItem('broadside.' + k, JSON.stringify(store[k]));
     if (boot) sessionStorage.setItem('broadside.boot', boot);
   }, [store, boot]);

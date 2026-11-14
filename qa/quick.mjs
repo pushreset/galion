@@ -26,7 +26,7 @@ async function open(name) {
   const page = await (await browser.newContext({ viewport: { width: 960, height: 540 } })).newPage();
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && !/WebSocket|ERR_|CORS/.test(m.text()) && errors.push(`${name}: ${m.text()}`));
-  await page.addInitScript((captain) => { localStorage.setItem('broadside.name', JSON.stringify(captain)); sessionStorage.setItem('broadside.boot', 'online'); }, name.split(' ')[1].toUpperCase()); // straight to the online hub, named HOST or GUEST
+  await page.addInitScript((captain) => { localStorage.setItem('broadside.name', JSON.stringify(captain)); localStorage.setItem('broadside.lang', '"en"'); sessionStorage.setItem('broadside.boot', 'online'); }, name.split(' ')[1].toUpperCase()); // straight to the online hub, named HOST or GUEST
   await page.goto(`${URL}?ice=http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__ready === true, null, { timeout: 30000 });
   return page;

@@ -88,25 +88,25 @@
 <div id="ui" class="bs-ui"><div id="ui-veil"></div><div id="ui-stage"><div id="ui-screen"></div><div id="ui-hints" class="bs-hints"></div><div id="ui-modal"></div><div id="ui-toasts"></div></div></div>
 <div id="room" class="hud panel" hidden></div>
 <div id="stats" class="hud panel">
-  <span>HULL</span><div class="bar"><i id="hp"></i></div>
-  <span>SAIL <b id="kn"></b></span><div class="bar"><i id="sail"></i></div>
-  <span><kbd id="k-port"></kbd> PORT</span><div class="bar"><i id="rp"></i></div>
-  <span><kbd id="k-star"></kbd> STAR</span><div class="bar"><i id="rs"></i></div>
-  <span>CREW <b id="crewn"></b></span><div class="bar"><i id="crew"></i></div>
+  <span data-t="HULL">HULL</span><div class="bar"><i id="hp"></i></div>
+  <span><span data-t="SAIL">SAIL</span> <b id="kn"></b></span><div class="bar"><i id="sail"></i></div>
+  <span><kbd id="k-port"></kbd> <span data-t="PORT">PORT</span></span><div class="bar"><i id="rp"></i></div>
+  <span><kbd id="k-star"></kbd> <span data-t="STAR">STAR</span></span><div class="bar"><i id="rs"></i></div>
+  <span><span data-t="CREW">CREW</span> <b id="crewn"></b></span><div class="bar"><i id="crew"></i></div>
 </div>
-<div id="score" class="hud panel"><div id="pvp" hidden></div><div id="coop">GOLD <b id="gold">0</b><br><span id="wave-l">WAVE</span> <b id="wave">0</b><span id="navy" hidden><br>NAVY GOLD <b id="delivered">0</b></span></div><div id="combo" hidden>COMBO <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
+<div id="score" class="hud panel"><div id="pvp" hidden></div><div id="coop"><span data-t="GOLD">GOLD</span> <b id="gold">0</b><br><span id="wave-l">WAVE</span> <b id="wave">0</b><span id="navy" hidden><br><span data-t="NAVY GOLD">NAVY GOLD</span> <b id="delivered">0</b></span></div><div id="combo" hidden><span data-t="COMBO">COMBO</span> <b id="combo-n"></b><div class="bar"><i id="combo-t"></i></div></div></div>
 <div id="bars" class="hud"><div id="board-hint" hidden></div></div>
 <div id="skills" class="hud"></div>
 <div id="radar-box" class="hud"><canvas id="radar"></canvas></div>
 <div id="banner" class="hud panel" hidden></div>
 <div id="boarding" class="hud panel" hidden>
   <h2 id="b-title">BOARDING!</h2>
-  <div class="b-row"><span>YOUR CREW</span><div class="bar"><i id="b-you"></i></div><b id="b-youn"></b></div>
-  <div class="b-row"><span>DEFENDERS</span><div class="bar"><i id="b-them"></i></div><b id="b-themn"></b></div>
+  <div class="b-row"><span data-t="YOUR CREW">YOUR CREW</span><div class="bar"><i id="b-you"></i></div><b id="b-youn"></b></div>
+  <div class="b-row"><span data-t="DEFENDERS">DEFENDERS</span><div class="bar"><i id="b-them"></i></div><b id="b-themn"></b></div>
   <div id="b-line"><i id="b-zone"></i><i id="b-target"></i><i id="b-cursor"></i></div>
   <div class="bar" id="b-timebar"><i id="b-time"></i></div>
   <div id="b-msg"></div>
-  <div class="b-help"><kbd id="k-board"></kbd> when the cursor is on the gold mark</div>
+  <div class="b-help"><kbd id="k-board"></kbd> <span data-t="when the cursor is on the gold mark">when the cursor is on the gold mark</span></div>
 </div>
 <div id="cards" class="hud panel" hidden><h2 id="cards-h"></h2><div id="cards-list"></div></div>
 <div id="help" class="hud panel"></div>

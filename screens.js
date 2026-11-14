@@ -2,6 +2,7 @@
 // g: what game.js lends the menus (ships, start a run, sound…); the menus never import the game.
 import * as ui from './ui.js';
 import { screens, esc, keyLabel } from './ui.js';
+import { t, tn, tk, lang, setLang } from './i18n.js';
 import { store, cleanName, rollName, rebind, swapKeys, DEFAULT_KEYS, SHIPS, boardOf } from './store.js';
 
 const mine = (row, name) => row.crew.some((c) => c.name === name);
@@ -10,7 +11,7 @@ const SKULL = 'M3 0h6v1h-6z M2 1h8v1h-8z M1 2h10v1h-10z M1 3h1v2h-1z M4 3h4v2h-4
 const skull = (w, shadow) => `<svg width="${w}" height="${w * 0.75}" viewBox="0 0 12 9" shape-rendering="crispEdges" aria-hidden="true">` +
   `${shadow ? `<path fill="#1b110b" transform="translate(0.5 0.5)" d="${SKULL}"/>` : ''}<path fill="#f5ecd2" d="${SKULL} M3 8h1v1h-1z M5 8h2v1h-2z M8 8h1v1h-1z"/></svg>`;
 const logo = (top) => `<div class="bs-abs bs-logo" style="left:0;right:0;top:${top}px;text-align:center;font-size:32px;line-height:32px;letter-spacing:3px;text-shadow:2px 2px 0 var(--bs-trim-hi),4px 4px 0 var(--bs-wood-edge)">BROADSIDE</div>`;
-const num = (n) => (+n).toLocaleString('en-US');
+const num = (n) => (+n).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US');
 
 // A name field (name screen, settings): A to Z, 12 at most. A refused key flashes it red.
 function nameKey(e, input) {
@@ -27,23 +28,23 @@ const head = (x, y, parts, on, title) => `<div class="bs-abs bs-col" style="left
 const key = (k) => `<span class="bs-key">${esc(k)}</span>`;
 const rect = (list, fill) => list.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`).join('');
 // mode pictures: 62×25 cells, 5 px each
-const art = (label, body) => `<svg width="310" height="125" viewBox="0 0 62 25" shape-rendering="crispEdges" role="img" aria-label="${label}" style="display:block;background:#174478;box-shadow:0 0 0 2px #1b110b">${body}</svg>`;
+const art = (label, body) => () => `<svg width="310" height="125" viewBox="0 0 62 25" shape-rendering="crispEdges" role="img" aria-label="${t(label)}" style="display:block;background:#174478;box-shadow:0 0 0 2px #1b110b">${body}</svg>`;
 const MODE = {
-  waves: { name: 'WAVES', unit: 'WAVE', text: 'SURVIVE WAVE AFTER WAVE OF THE NAVY. EACH ONE HITS HARDER.', meta: 'ENDS WHEN YOU SINK',
-    art: art('Your ship surrounded by rings of enemy ships', rect([[3, 3, 4, 1], [48, 21, 5, 1]], '#2f87bb') + rect([[52, 6, 3, 1], [8, 20, 4, 1]], '#f4fffb') +
+  waves: { name: tk('WAVES'), unit: tk('WAVE'), text: tk('SURVIVE WAVE AFTER WAVE OF THE NAVY. EACH ONE HITS HARDER.'), meta: tk('ENDS WHEN YOU SINK'),
+    art: art(tk('Your ship surrounded by rings of enemy ships'), rect([[3, 3, 4, 1], [48, 21, 5, 1]], '#2f87bb') + rect([[52, 6, 3, 1], [8, 20, 4, 1]], '#f4fffb') +
       rect([[16, 12, 2, 2], [44, 11, 2, 2], [18, 4, 2, 2], [42, 4, 2, 2], [18, 19, 2, 2], [42, 19, 2, 2]], '#6b2a24') +
       rect([[20, 10, 2, 2], [40, 12, 2, 2], [29, 1, 2, 2], [29, 21, 2, 2], [37, 4, 2, 2], [23, 18, 2, 2], [37, 18, 2, 2], [23, 4, 2, 2]], '#a83a2c') +
       rect([[36, 11, 2, 2], [24, 11, 2, 2], [30, 5, 2, 2], [30, 17, 2, 2], [34, 7, 2, 2], [26, 15, 2, 2]], '#d84a38') + rect([[29, 10, 4, 4]], '#1b110b') + rect([[30, 11, 2, 2]], '#ffd24a')) },
-  convoy: { name: 'CONVOY', unit: 'CONVOY', text: 'A LONG CROSSING BETWEEN TWO PORTS. HUNT DOWN ESCORTED MERCHANT CONVOYS.', meta: 'GOLD OVER SURVIVAL',
-    art: art('A merchant convoy sailing between two ports', rect([[0, 0, 6, 25], [56, 0, 6, 25]], '#c9a66b') + rect([[0, 0, 3, 25], [59, 0, 3, 25]], '#5f8f3a') + rect([[6, 11, 3, 2], [53, 11, 3, 2]], '#8d5c35') +
+  convoy: { name: tk('CONVOY'), unit: tk('CONVOY'), text: tk('A LONG CROSSING BETWEEN TWO PORTS. HUNT DOWN ESCORTED MERCHANT CONVOYS.'), meta: tk('GOLD OVER SURVIVAL'),
+    art: art(tk('A merchant convoy sailing between two ports'), rect([[0, 0, 6, 25], [56, 0, 6, 25]], '#c9a66b') + rect([[0, 0, 3, 25], [59, 0, 3, 25]], '#5f8f3a') + rect([[6, 11, 3, 2], [53, 11, 3, 2]], '#8d5c35') +
       rect([[10, 12, 2, 1], [14, 12, 2, 1], [31, 12, 2, 1], [35, 12, 2, 1], [39, 12, 2, 1], [43, 12, 2, 1], [47, 12, 2, 1]], '#ddcda6') + rect([[19, 11, 2, 2], [23, 11, 2, 2], [27, 11, 2, 2]], '#f5ecd2') +
       rect([[17, 8, 2, 2], [25, 8, 2, 2], [21, 15, 2, 2], [29, 15, 2, 2]], '#d84a38') + rect([[40, 18, 4, 4]], '#1b110b') + rect([[41, 19, 2, 2]], '#ffd24a') +
       rect([[36, 20, 3, 1], [44, 5, 4, 1]], '#f4fffb') + rect([[13, 4, 4, 1]], '#2f87bb')) },
 };
-const STATS = ['SPEED', 'HANDLING', 'HULL', 'GUNS', 'RELOAD', 'CREW'];
+const STATS = [tk('SPEED'), tk('HANDLING'), tk('HULL'), tk('GUNS'), tk('RELOAD'), tk('CREW')];
 const KEY_ROWS = [[['sailUp'], 'SAIL UP'], [['sailDown'], 'SAIL DOWN'], [['turnLeft'], 'TURN LEFT'], [['turnRight'], 'TURN RIGHT'], [['firePort'], 'FIRE PORT (LEFT)'], [['fireStarboard'], 'FIRE STARBOARD (RIGHT)'],
   [['skill1', 'skill2', 'skill3', 'skill4'], 'SKILLS 1 TO 4'], [['board'], 'BOARD'], [['overview'], 'OVERVIEW (ZOOM)'], [['mute'], 'MUTE'], [['pause'], 'PAUSE']];
-const actionLabel = (a) => (a.startsWith('skill') ? 'SKILL ' + a.slice(5) : KEY_ROWS.find(([ids]) => ids[0] === a)[1]);
+const actionLabel = (a) => (a.startsWith('skill') ? t('SKILL {0}', a.slice(5)) : t(KEY_ROWS.find(([ids]) => ids[0] === a)[1]));
 
 export function initScreens(g) {
   // 01 · the first key or click unlocks the browser's audio; it must not act on the screen that follows
@@ -52,9 +53,9 @@ export function initScreens(g) {
     render(el) {
       el.innerHTML = `<div class="bs-title-bar" style="bottom:100%;margin-bottom:-48px"></div><div class="bs-title-bar" style="top:100%;margin-top:-48px"></div>
         <div class="bs-abs bs-col" style="left:0;right:0;top:116px;align-items:center;gap:12px">${skull(80, true)}<h1 class="bs-logo">BROADSIDE</h1>
-          <div class="bs-row" style="gap:12px;font-size:16px;line-height:16px;letter-spacing:3px;text-shadow:2px 2px 0 var(--bs-wood-edge)"><i style="width:44px;height:3px;background:var(--bs-trim-hi)"></i>PIRATE BATTLES ON THE HIGH SEAS<i style="width:44px;height:3px;background:var(--bs-trim-hi)"></i></div></div>
-        <div class="bs-abs bs-title-blink" style="left:0;right:0;top:424px;text-align:center;font-size:24px;line-height:24px;letter-spacing:3px;text-shadow:3px 3px 0 var(--bs-wood-edge)">PRESS ANY KEY</div>
-        <div class="bs-abs bs-dim" style="left:0;right:0;top:464px;text-align:center;letter-spacing:1px;text-shadow:1px 1px 0 var(--bs-wood-edge)">OR CLICK ANYWHERE</div>`;
+          <div class="bs-row" style="gap:12px;font-size:16px;line-height:16px;letter-spacing:3px;text-shadow:2px 2px 0 var(--bs-wood-edge)"><i style="width:44px;height:3px;background:var(--bs-trim-hi)"></i>${t('PIRATE BATTLES ON THE HIGH SEAS')}<i style="width:44px;height:3px;background:var(--bs-trim-hi)"></i></div></div>
+        <div class="bs-abs bs-title-blink" style="left:0;right:0;top:424px;text-align:center;font-size:24px;line-height:24px;letter-spacing:3px;text-shadow:3px 3px 0 var(--bs-wood-edge)">${t('PRESS ANY KEY')}</div>
+        <div class="bs-abs bs-dim" style="left:0;right:0;top:464px;text-align:center;letter-spacing:1px;text-shadow:1px 1px 0 var(--bs-wood-edge)">${t('OR CLICK ANYWHERE')}</div>`;
       const go = () => { g.unlock(); ui.reset(store.name ? 'menu' : 'name'); };
       addEventListener('click', go); // anywhere: the stage does not cover a wide window
       return { close: () => removeEventListener('click', go), keys(e) { if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !/^(Shift|Control|Alt|Meta|CapsLock|F\d+)/.test(e.key)) go(); return true; } };
@@ -67,11 +68,11 @@ export function initScreens(g) {
     hints: [[['A-Z'], 'TYPE'], [['ENTER'], 'CONFIRM'], [['TAB'], 'ROLL A NAME']],
     render(el) {
       el.innerHTML = `${logo(48)}<div class="bs-abs bs-panel bs-col" style="left:240px;top:132px;width:480px;padding:24px 32px;gap:16px">
-        <div class="bs-col" style="gap:4px"><div class="bs-gold" style="letter-spacing:1px">WELCOME ABOARD</div><h1 style="font-size:24px;line-height:28px;font-weight:700">WHAT DO THEY CALL YOU, CAPTAIN?</h1></div>
-        <div class="bs-col" style="gap:4px"><label class="bs-dim" for="name-in">CAPTAIN NAME</label>
+        <div class="bs-col" style="gap:4px"><div class="bs-gold" style="letter-spacing:1px">${t('WELCOME ABOARD')}</div><h1 style="font-size:24px;line-height:28px;font-weight:700">${t('WHAT DO THEY CALL YOU, CAPTAIN?')}</h1></div>
+        <div class="bs-col" style="gap:4px"><label class="bs-dim" for="name-in">${t('CAPTAIN NAME')}</label>
           <div class="bs-row" style="gap:12px"><input id="name-in" class="bs-field" data-f="name" data-first maxlength="12" autocomplete="off" spellcheck="false" style="height:48px;font-size:24px;letter-spacing:3px;padding:0 12px"><span class="bs-dim" id="name-n" style="width:40px;text-align:right"></span></div>
-          <p class="bs-dim">A TO Z ONLY. SHOWN ABOVE YOUR SHIP ONLINE AND ON THE LEADERBOARD. CHANGE IT LATER IN SETTINGS.</p></div>
-        <div class="bs-row" style="justify-content:space-between"><button class="bs-btn" data-f="roll">⟳ ROLL A NAME</button><button class="bs-btn bs-btn--primary" data-f="ahoy">▶ AHOY</button></div></div>`;
+          <p class="bs-dim">${t('A TO Z ONLY. SHOWN ABOVE YOUR SHIP ONLINE AND ON THE LEADERBOARD. CHANGE IT LATER IN SETTINGS.')}</p></div>
+        <div class="bs-row" style="justify-content:space-between"><button class="bs-btn" data-f="roll">⟳ ${t('ROLL A NAME')}</button><button class="bs-btn bs-btn--primary" data-f="ahoy">▶ ${t('AHOY')}</button></div></div>`;
       const input = el.querySelector('input'), ahoy = el.querySelector('[data-f=ahoy]');
       const show = () => { el.querySelector('#name-n').textContent = `${input.value.length}/12`; ahoy.disabled = !input.value; };
       const roll = () => { input.value = rollName(); show(); input.focus(); input.select(); }; // selected: typing replaces it, Enter keeps it
@@ -97,16 +98,16 @@ export function initScreens(g) {
       const mode = store.lastMode, ship = g.ships[props.ship], best = store.best[mode][0];
       const item = (f, title, sub, extra = '') => `<button class="bs-btn" data-f="${f}"${extra}><span>${title}</span><span>${sub}</span></button>`;
       el.innerHTML = `<div class="bs-abs bs-logo bs-logo--s" style="left:64px;top:52px">BROADSIDE</div>
-        <div class="bs-abs bs-chip" style="right:32px;top:28px">${skull(16)}<span class="bs-dim">CAPTAIN</span><span class="bs-gold" style="font-size:16px;line-height:16px;letter-spacing:1px">${esc(store.name)}</span><button class="bs-btn bs-btn--s" data-f="edit" aria-label="Change name">EDIT</button></div>
+        <div class="bs-abs bs-chip" style="right:32px;top:28px">${skull(16)}<span class="bs-dim">${t('CAPTAIN')}</span><span class="bs-gold" style="font-size:16px;line-height:16px;letter-spacing:1px">${esc(store.name)}</span><button class="bs-btn bs-btn--s" data-f="edit" aria-label="${t('Change name')}">${t('EDIT')}</button></div>
         <nav class="bs-abs bs-menu" style="left:64px;top:152px;width:320px">
-          ${store.played ? `<button class="bs-btn bs-btn--primary" data-f="sail" data-first style="padding:12px 16px"><span style="font-size:24px;line-height:24px">▶ SET SAIL</span><span>${mode.toUpperCase()} · SOLO · ${ship.name} (YOUR LAST VOYAGE)</span></button>` : ''}
-          ${item('solo', 'SOLO', 'PICK A MODE AND A SHIP', store.played ? '' : ' data-first')}
-          ${item('online', 'ONLINE', 'CO-OP OR PVP · 2 TO 4 PIRATES')}
-          ${item('board', 'LEADERBOARD', 'WAVES · CONVOY · WORLD', screens.leaderboard ? '' : ' disabled')}
-          ${item('settings', 'SETTINGS', 'SOUND · CONTROLS · NAME', screens.settings ? '' : ' disabled')}
+          ${store.played ? `<button class="bs-btn bs-btn--primary" data-f="sail" data-first style="padding:12px 16px"><span style="font-size:24px;line-height:24px">▶ ${t('SET SAIL')}</span><span>${t(MODE[mode].name)} · SOLO · ${ship.name} ${t('(YOUR LAST VOYAGE)')}</span></button>` : ''}
+          ${item('solo', 'SOLO', t('PICK A MODE AND A SHIP'), store.played ? '' : ' data-first')}
+          ${item('online', t('ONLINE'), t('CO-OP OR PVP · 2 TO 4 PIRATES'))}
+          ${item('board', t('LEADERBOARD'), t('WAVES · CONVOY · WORLD'), screens.leaderboard ? '' : ' disabled')}
+          ${item('settings', t('SETTINGS'), t('SOUND · CONTROLS · LANGUAGE'), screens.settings ? '' : ' disabled')}
         </nav>
-        ${best ? `<div class="bs-abs bs-chip bs-col" style="right:32px;bottom:44px;align-items:flex-end;gap:4px;padding:8px 12px"><span class="bs-dim" style="letter-spacing:1px">YOUR BEST · ${mode.toUpperCase()}</span>
-          <span style="font-size:16px;line-height:16px">${mode === 'convoy' ? 'CONVOY' : 'WAVE'} ${best.wave} · <span class="bs-gold">${num(best.gold)} GOLD</span>${best.world ? ` · #${best.world} WORLD` : ''}</span></div>` : ''}`;
+        ${best ? `<div class="bs-abs bs-chip bs-col" style="right:32px;bottom:44px;align-items:flex-end;gap:4px;padding:8px 12px"><span class="bs-dim" style="letter-spacing:1px">${t('YOUR BEST')} · ${t(MODE[mode].name)}</span>
+          <span style="font-size:16px;line-height:16px">${t(MODE[mode].unit)} ${best.wave} · <span class="bs-gold">${t('{0} GOLD', num(best.gold))}</span>${best.world ? ` · ${t('#{0} WORLD', best.world)}` : ''}</span></div>` : ''}`;
       return { acts: {
         sail: () => g.startSolo(mode, props.ship),
         solo: () => ui.open('solo-mode'),
@@ -127,15 +128,15 @@ export function initScreens(g) {
       const best = store.best;
       const card = (id, i) => {
         const m = MODE[id], top = [...best[id], ...best[id + '-crew']].sort((a, b) => b.wave - a.wave)[0];
-        const badge = store.played && store.lastMode === id ? '<span class="bs-badge">LAST PLAYED</span>' : top ? '' : '<span class="bs-badge bs-badge--off">NEW</span>';
-        return `<button class="bs-card" data-f="${id}" aria-pressed="${props.sel === id}"${props.sel === id ? ' data-first' : ''}><span class="bs-row" style="justify-content:space-between">${key(i + 1)}${badge}</span>${m.art}
-          <span class="bs-card-name">${m.name}</span><span>${m.text}</span>
-          <span class="bs-row bs-dim" style="gap:16px"><span>SOLO OR CO-OP</span><span>${m.meta}</span><span>BEST : ${top ? `<span class="bs-gold">${m.unit} ${top.wave}</span>` : 'NOT PLAYED'}</span></span></button>`;
+        const badge = store.played && store.lastMode === id ? `<span class="bs-badge">${t('LAST PLAYED')}</span>` : top ? '' : `<span class="bs-badge bs-badge--off">${t('NEW')}</span>`;
+        return `<button class="bs-card" data-f="${id}" aria-pressed="${props.sel === id}"${props.sel === id ? ' data-first' : ''}><span class="bs-row" style="justify-content:space-between">${key(i + 1)}${badge}</span>${m.art()}
+          <span class="bs-card-name">${t(m.name)}</span><span>${t(m.text)}</span>
+          <span class="bs-row bs-dim" style="gap:16px"><span>${t('SOLO OR CO-OP')}</span><span>${t(m.meta)}</span><span>${t('BEST')} : ${top ? `<span class="bs-gold">${t(m.unit)} ${top.wave}</span>` : t('NOT PLAYED')}</span></span></button>`;
       };
-      el.innerHTML = `${head(90, 28, ['SOLO', 'MODE', 'SHIP'], 1, 'CHOOSE YOUR WAR')}
-        <div class="bs-abs bs-row bs-dim" style="right:90px;top:60px;gap:6px"><i style="width:28px;height:6px;background:var(--bs-gold)"></i><i style="width:28px;height:6px;background:var(--bs-wood-hi);box-shadow:inset 0 0 0 1px var(--bs-trim)"></i><span style="margin-left:6px">STEP 1 OF 2</span></div>
+      el.innerHTML = `${head(90, 28, ['SOLO', 'MODE', t('SHIP')], 1, t('CHOOSE YOUR WAR'))}
+        <div class="bs-abs bs-row bs-dim" style="right:90px;top:60px;gap:6px"><i style="width:28px;height:6px;background:var(--bs-gold)"></i><i style="width:28px;height:6px;background:var(--bs-wood-hi);box-shadow:inset 0 0 0 1px var(--bs-trim)"></i><span style="margin-left:6px">${t('STEP 1 OF 2')}</span></div>
         <div class="bs-abs" style="left:90px;top:104px;width:780px;display:grid;grid-template-columns:1fr 1fr;gap:32px">${card('waves', 0)}${card('convoy', 1)}</div>
-        <div class="bs-abs bs-row" style="left:90px;top:432px;width:780px;justify-content:space-between"><button class="bs-btn" data-f="back">◀ BACK</button><button class="bs-btn bs-btn--primary" data-f="next">NEXT : SHIP ▶</button></div>`;
+        <div class="bs-abs bs-row" style="left:90px;top:432px;width:780px;justify-content:space-between"><button class="bs-btn" data-f="back">◀ ${t('BACK')}</button><button class="bs-btn bs-btn--primary" data-f="next">${t('NEXT : SHIP')} ▶</button></div>`;
       const pick = (id) => { props.sel = id; for (const c of el.querySelectorAll('.bs-card')) c.setAttribute('aria-pressed', c.dataset.f === id); };
       for (const c of el.querySelectorAll('.bs-card')) c.onfocus = () => pick(c.dataset.f);
       const next = () => { g.setMode(props.sel); ui.open('ship', { mode: props.sel }); };
@@ -154,16 +155,16 @@ export function initScreens(g) {
     render(el, props) {
       props.mode ??= store.lastMode;
       props.sel ??= SHIPS.indexOf(store.lastShip);
-      el.innerHTML = `${head(44, 28, ['SOLO', 'MODE', 'SHIP'], 2, 'CHOOSE YOUR SHIP')}
-        <div class="bs-abs bs-chip" style="right:44px;top:36px"><span class="bs-dim">MODE</span><span>${MODE[props.mode].name} · SOLO</span><button class="bs-btn bs-btn--s" data-f="change">CHANGE</button></div>
+      el.innerHTML = `${head(44, 28, ['SOLO', 'MODE', t('SHIP')], 2, t('CHOOSE YOUR SHIP'))}
+        <div class="bs-abs bs-chip" style="right:44px;top:36px"><span class="bs-dim">MODE</span><span>${t(MODE[props.mode].name)} · SOLO</span><button class="bs-btn bs-btn--s" data-f="change">${t('CHANGE')}</button></div>
         <div class="bs-abs bs-panel bs-col" style="left:576px;top:92px;width:340px;padding:16px 20px;gap:12px">
-          <div class="bs-row" style="gap:12px"><span id="ship-name" class="bs-gold" style="font-size:32px;line-height:32px;font-weight:700"></span><span id="ship-last" class="bs-badge">LAST SAILED</span></div>
+          <div class="bs-row" style="gap:12px"><span id="ship-name" class="bs-gold" style="font-size:32px;line-height:32px;font-weight:700"></span><span id="ship-last" class="bs-badge">${t('LAST SAILED')}</span></div>
           <p id="ship-tag" class="bs-dim"></p>
-          <div class="bs-col" style="gap:6px">${STATS.map((l) => `<div class="bs-row"><span style="width:80px">${l}</span><span class="bs-gauge">${'<span></span>'.repeat(10)}</span></div>`).join('')}</div>
-          <div class="bs-col" style="gap:8px;border-top:2px solid var(--bs-wood-edge);padding-top:12px"><span class="bs-dim" style="letter-spacing:1px">STARTING SKILLS</span><div id="ship-kit" class="bs-col" style="gap:6px"></div><span class="bs-dim">SLOTS 3 AND 4 UNLOCK AT SEA</span></div></div>
-        <div class="bs-abs bs-row" style="left:44px;top:432px;gap:8px"><button class="bs-btn" data-f="prev" aria-label="Previous ship">◀</button>
-          ${g.ships.map((s, i) => `<button class="bs-btn bs-row" data-f="s${i}" style="gap:8px">${key(i + 1)}${s.name}</button>`).join('')}<button class="bs-btn" data-f="nxt" aria-label="Next ship">▶</button></div>
-        <div class="bs-abs bs-row" style="left:576px;top:432px;width:340px;justify-content:space-between"><button class="bs-btn" data-f="back">◀ BACK</button><button class="bs-btn bs-btn--primary" data-f="sail" data-first>SET SAIL ▶</button></div>`;
+          <div class="bs-col" style="gap:6px">${STATS.map((l) => `<div class="bs-row"><span style="width:80px">${t(l)}</span><span class="bs-gauge">${'<span></span>'.repeat(10)}</span></div>`).join('')}</div>
+          <div class="bs-col" style="gap:8px;border-top:2px solid var(--bs-wood-edge);padding-top:12px"><span class="bs-dim" style="letter-spacing:1px">${t('STARTING SKILLS')}</span><div id="ship-kit" class="bs-col" style="gap:6px"></div><span class="bs-dim">${t('SLOTS 3 AND 4 UNLOCK AT SEA')}</span></div></div>
+        <div class="bs-abs bs-row" style="left:44px;top:432px;gap:8px"><button class="bs-btn" data-f="prev" aria-label="${t('Previous ship')}">◀</button>
+          ${g.ships.map((s, i) => `<button class="bs-btn bs-row" data-f="s${i}" style="gap:8px">${key(i + 1)}${s.name}</button>`).join('')}<button class="bs-btn" data-f="nxt" aria-label="${t('Next ship')}">▶</button></div>
+        <div class="bs-abs bs-row" style="left:576px;top:432px;width:340px;justify-content:space-between"><button class="bs-btn" data-f="back">◀ ${t('BACK')}</button><button class="bs-btn bs-btn--primary" data-f="sail" data-first>${t('SET SAIL')} ▶</button></div>`;
       const gauges = [...el.querySelectorAll('.bs-gauge')], shown = STATS.map(() => 0);
       // gauges step to their new value one segment at a time
       const timer = setInterval(() => gauges.forEach((gEl, k) => {
@@ -175,9 +176,9 @@ export function initScreens(g) {
       const show = (i) => {
         const s = g.ships[props.sel = (i + 3) % 3];
         el.querySelector('#ship-name').textContent = s.name;
-        el.querySelector('#ship-tag').textContent = s.blurb;
+        el.querySelector('#ship-tag').textContent = t(s.blurb);
         el.querySelector('#ship-last').hidden = !(store.played && SHIPS[props.sel] === store.lastShip);
-        el.querySelector('#ship-kit').innerHTML = s.skills.map((k, n) => `<div class="bs-row" style="gap:8px;font-size:16px;line-height:16px">${key(n + 1)}<img src="${k.icon}" width="16" height="16" alt="">${k.name}</div>`).join('');
+        el.querySelector('#ship-kit').innerHTML = s.skills.map((k, n) => `<div class="bs-row" style="gap:8px;font-size:16px;line-height:16px">${key(n + 1)}<img src="${k.icon}" width="16" height="16" alt="">${t(k.name)}</div>`).join('');
         g.ships.forEach((_, n) => el.querySelector(`[data-f=s${n}]`).setAttribute('aria-pressed', n === props.sel));
       };
       show(props.sel);
@@ -205,19 +206,19 @@ export function initScreens(g) {
       const gain = old - rank - 1;
       const from = Math.max(0, Math.min(rank - 2, top.length - 4));
       const row = (r, i) => `<div class="bs-over-row${i === rank ? ' is-you' : ''}"><span>${i + 1}</span><span>${esc(r.crew[0].name)}${r.crew.length > 1 ? ` +${r.crew.length - 1}` : ''}${i === rank && gain > 0 ? ` <span class="bs-over-up">▲ ${gain}</span>` : ''}</span><span>${+r.wave}</span><span>${num(r.gold)}</span><span>×${+r.combo}</span></div>`;
-      const ranks = [props.world === null ? '' : props.world < 0 ? 'OFF THE WORLD TOP 100' : `#${props.world + 1} WORLD`, props.local < 0 ? '' : `#${props.local + 1} THIS BROWSER`].filter(Boolean).join(' · ');
+      const ranks = [props.world === null ? '' : props.world < 0 ? t('OFF THE WORLD TOP 100') : t('#{0} WORLD', props.world + 1), props.local < 0 ? '' : t('#{0} THIS BROWSER', props.local + 1)].filter(Boolean).join(' · ');
       const btn = (f, label, first) => `<button class="bs-btn" data-f="${f}"${first ? ' data-first' : ''}${f === 'board' && !screens.leaderboard ? ' disabled' : ''}>${label}</button>`;
-      el.innerHTML = `<div class="bs-abs bs-panel bs-col" role="dialog" aria-label="Run over" style="left:220px;top:24px;width:520px;padding:16px 28px;gap:12px;align-items:center">
-        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(--bs-red);text-shadow:3px 3px 0 var(--bs-wood-edge)">SUNK</h1>
-          <span class="bs-dim" style="letter-spacing:1px">${m.name} · ${solo ? `SOLO · ${e.crew[0].ship.toUpperCase()}` : `CREW OF ${e.crew.length}`}</span></div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-self:stretch">${[[m.unit, e.wave, ''], ['GOLD', num(e.gold), 'var(--bs-gold)'], ['BEST COMBO', '×' + e.combo, 'var(--bs-orange)']].map(([l, v, c]) =>
+      el.innerHTML = `<div class="bs-abs bs-panel bs-col" role="dialog" aria-label="${t('Run over')}" style="left:220px;top:24px;width:520px;padding:16px 28px;gap:12px;align-items:center">
+        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(--bs-red);text-shadow:3px 3px 0 var(--bs-wood-edge)">${t('SUNK')}</h1>
+          <span class="bs-dim" style="letter-spacing:1px">${t(m.name)} · ${solo ? `SOLO · ${e.crew[0].ship.toUpperCase()}` : t('CREW OF {0}', e.crew.length)}</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-self:stretch">${[[t(m.unit), e.wave, ''], [t('GOLD'), num(e.gold), 'var(--bs-gold)'], [t('BEST COMBO'), '×' + e.combo, 'var(--bs-orange)']].map(([l, v, c]) =>
           `<div class="bs-col" style="padding:8px;background:var(--bs-wood-edge);align-items:center;gap:4px"><span class="bs-dim">${l}</span><span style="font-size:24px;line-height:24px;color:${c}">${v}</span></div>`).join('')}</div>
-        ${props.best ? '<div class="bs-badge" style="padding:4px 12px;font-size:16px;line-height:16px;letter-spacing:1px">NEW PERSONAL BEST</div>' : ''}
-        <div class="bs-col" style="gap:2px;align-self:stretch"><div class="bs-row bs-dim" style="justify-content:space-between;padding:0 8px 4px"><span>SIGNED AS <span class="bs-gold">${esc(name)}</span></span><span>${ranks}</span></div>
+        ${props.best ? `<div class="bs-badge" style="padding:4px 12px;font-size:16px;line-height:16px;letter-spacing:1px">${t('NEW PERSONAL BEST')}</div>` : ''}
+        <div class="bs-col" style="gap:2px;align-self:stretch"><div class="bs-row bs-dim" style="justify-content:space-between;padding:0 8px 4px"><span>${t('SIGNED AS')} <span class="bs-gold">${esc(name)}</span></span><span>${ranks}</span></div>
           ${top.slice(from, from + 4).map((r, i) => row(r, from + i)).join('')}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-self:stretch">${props.online ? btn('crew', '▶ FIND A NEW CREW', 1) : btn('again', '▶ SAIL AGAIN', 1) + btn('ship', 'CHANGE SHIP')}${btn('board', 'LEADERBOARD')}${btn('menu', 'MAIN MENU')}</div></div>`;
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;align-self:stretch">${props.online ? btn('crew', '▶ ' + t('FIND A NEW CREW'), 1) : btn('again', '▶ ' + t('SAIL AGAIN'), 1) + btn('ship', t('CHANGE SHIP'))}${btn('board', t('LEADERBOARD'))}${btn('menu', t('MAIN MENU'))}</div></div>`;
       const acts = { again: () => g.reboot('sail'), ship: () => g.reboot('ship'), crew: () => g.reboot('online'), menu: () => g.reboot('menu'),
-        board: () => ui.open('leaderboard', { mode: e.mode, crew: !solo, from: 'RUN OVER' }) };
+        board: () => ui.open('leaderboard', { mode: e.mode, crew: !solo, from: tk('RUN OVER') }) };
       return { acts, back: acts.menu, keys(ev) { if (ev.code !== 'Space' || props.online) return false; if (!ev.repeat) acts.again(); return true; } };
     },
   };
@@ -228,13 +229,13 @@ export function initScreens(g) {
     hints: () => [[g.pauseKeys(), 'RESUME'], [['↑', '↓'], 'CHOOSE'], [['ENTER'], 'CONFIRM']],
     render(el, props) {
       g.pauseAudio(true); // back from the settings
-      el.innerHTML = `${props.online ? '<div class="bs-abs bs-toast bs-toast--warn" role="status" style="left:260px;top:16px;width:440px;justify-content:center"><b>!</b> ONLINE : THE SEA DOES NOT STOP. YOUR SHIP DRIFTS.</div>' : ''}
-        <div class="bs-abs bs-panel bs-menu" role="dialog" aria-label="Paused" style="left:320px;top:${props.confirm ? 96 : 132}px;width:320px;padding:20px">
-          <h1 style="margin-bottom:4px;text-align:center;font-size:40px;line-height:40px;font-weight:700;letter-spacing:3px;text-shadow:3px 3px 0 var(--bs-wood-edge)">PAUSED</h1>
-          <button class="bs-btn" data-f="resume" data-first>RESUME</button><button class="bs-btn" data-f="settings"${screens.settings ? '' : ' disabled'}>SETTINGS</button><button class="bs-btn" data-f="quit">QUIT TO MENU</button>
-          ${props.confirm ? `<div class="bs-col" role="alertdialog" aria-label="Confirm quit" style="gap:8px;padding:12px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-red)">
-            <p>ABANDON SHIP ? THIS RUN ENDS AND THE SCORE IS NOT SIGNED.${props.online ? ' YOUR CREW SAILS ON WITHOUT YOU.' : ''}</p>
-            <div class="bs-row" style="gap:8px"><button class="bs-btn bs-btn--s bs-btn--danger" data-f="yes" style="padding:6px 10px">YES, QUIT</button><button class="bs-btn bs-btn--s" data-f="stay" style="padding:6px 10px">STAY ABOARD</button></div></div>` : ''}</div>`;
+      el.innerHTML = `${props.online ? `<div class="bs-abs bs-toast bs-toast--warn" role="status" style="left:260px;top:16px;width:440px;justify-content:center"><b>!</b> ${t('ONLINE : THE SEA DOES NOT STOP. YOUR SHIP DRIFTS.')}</div>` : ''}
+        <div class="bs-abs bs-panel bs-menu" role="dialog" aria-label="${t('Paused')}" style="left:320px;top:${props.confirm ? 96 : 132}px;width:320px;padding:20px">
+          <h1 style="margin-bottom:4px;text-align:center;font-size:40px;line-height:40px;font-weight:700;letter-spacing:3px;text-shadow:3px 3px 0 var(--bs-wood-edge)">${t('PAUSED')}</h1>
+          <button class="bs-btn" data-f="resume" data-first>${t('RESUME')}</button><button class="bs-btn" data-f="settings"${screens.settings ? '' : ' disabled'}>${t('SETTINGS')}</button><button class="bs-btn" data-f="quit">${t('QUIT TO MENU')}</button>
+          ${props.confirm ? `<div class="bs-col" role="alertdialog" aria-label="${t('Confirm quit')}" style="gap:8px;padding:12px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-red)">
+            <p>${t('ABANDON SHIP ? THIS RUN ENDS AND THE SCORE IS NOT SIGNED.')}${props.online ? ' ' + t('YOUR CREW SAILS ON WITHOUT YOU.') : ''}</p>
+            <div class="bs-row" style="gap:8px"><button class="bs-btn bs-btn--s bs-btn--danger" data-f="yes" style="padding:6px 10px">${t('YES, QUIT')}</button><button class="bs-btn bs-btn--s" data-f="stay" style="padding:6px 10px">${t('STAY ABOARD')}</button></div></div>` : ''}</div>`;
       const ask = (on) => { props.confirm = on; ui.refresh(); ui.focus(on ? 'stay' : 'quit'); };
       const back = () => (props.confirm ? ask(false) : g.resume());
       return { back, acts: { resume: g.resume, settings: () => { g.pauseAudio(false); ui.open('settings', { from: 'pause' }); }, quit: () => ask(true), yes: () => g.reboot('menu'), stay: () => ask(false) },
@@ -248,25 +249,25 @@ export function initScreens(g) {
     hints: [[['↑', '↓'], 'CHOOSE'], [['←', '→'], 'ADJUST'], [['TAB'], 'NEXT SECTION'], [['ESC'], 'BACK']],
     render(el, props) {
       props.tab ??= 'audio';
-      const TABS = [['audio', 'AUDIO'], ['controls', 'CONTROLS'], ['display', 'DISPLAY'], ['profile', 'PROFILE']];
-      el.innerHTML = `<div class="bs-abs bs-col" style="left:106px;top:28px;gap:4px"><div class="bs-crumb">${props.from === 'pause' ? 'PAUSE' : 'MENU'} ▸ SETTINGS</div><h1 class="bs-h1">SETTINGS</h1></div>
+      const TABS = [['audio', tk('AUDIO')], ['controls', tk('CONTROLS')], ['display', tk('DISPLAY')], ['profile', tk('PROFILE')]];
+      el.innerHTML = `<div class="bs-abs bs-col" style="left:106px;top:28px;gap:4px"><div class="bs-crumb">${props.from === 'pause' ? t('PAUSE') : 'MENU'} ▸ ${t('SETTINGS')}</div><h1 class="bs-h1">${t('SETTINGS')}</h1></div>
         <div class="bs-abs bs-panel bs-row" style="left:106px;top:92px;width:748px;height:396px;align-items:stretch">
           <div class="bs-tabs bs-tabs--v" role="tablist" aria-orientation="vertical" data-group style="width:160px;padding:16px 0 16px 16px;border-right:2px solid var(--bs-wood-edge)">
-            ${TABS.map(([id, l]) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.tab}"${id === props.tab ? ' data-first' : ''}>${l}</button>`).join('')}</div>
+            ${TABS.map(([id, l]) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.tab}"${id === props.tab ? ' data-first' : ''}>${t(l)}</button>`).join('')}</div>
           <div class="bs-col" data-group style="flex:1;min-width:0;padding:20px 24px;gap:12px"><div id="set-body" class="bs-col" style="gap:12px"></div>
-            <div class="bs-row" style="margin-top:auto;justify-content:space-between"><button class="bs-btn" data-f="back">◀ BACK</button><span style="color:var(--bs-green)">✓ SAVED AUTOMATICALLY</span></div></div></div>`;
+            <div class="bs-row" style="margin-top:auto;justify-content:space-between"><button class="bs-btn" data-f="back">◀ ${t('BACK')}</button><span style="color:var(--bs-green)">✓ ${t('SAVED AUTOMATICALLY')}</span></div></div></div>`;
       const body = el.querySelector('#set-body'), acts = { back: ui.pop };
       const switchHtml = (f, on, label, danger) => `<button class="bs-switch${danger ? ' bs-switch--danger' : ''}" role="switch" data-f="${f}" aria-checked="${on}" aria-label="${label}"><span></span></button>`;
       const paint = {
         audio() {
           const a = store.audio;
           const set = (k, v) => { a[k] = Math.max(0, Math.min(10, v)); store.audio = a; g.setAudio(a); draw('v-' + k); };
-          body.innerHTML = [['master', 'MASTER'], ['music', 'MUSIC'], ['fx', 'EFFECTS']].map(([k, l]) => `<div class="bs-row" style="gap:12px;font-size:16px;line-height:16px"><span style="width:104px">${l}</span>
-            <button class="bs-step" tabindex="-1" data-f="d-${k}" aria-label="${l} down">◀</button><div class="bs-slider${a.muted ? ' is-muted' : ''}" role="slider" tabindex="0" data-f="v-${k}" aria-label="${l}" aria-valuemin="0" aria-valuemax="10" aria-valuenow="${a[k]}">${Array.from({ length: 10 }, (_, i) => `<span${i < a[k] ? ' class="is-on"' : ''}></span>`).join('')}</div>
-            <button class="bs-step" tabindex="-1" data-f="u-${k}" aria-label="${l} up">▶</button><span style="width:44px;text-align:right;color:var(--${a.muted ? 'bs-trim' : 'bs-gold'})">${a[k] * 10}%</span>${k === 'fx' ? '<button class="bs-btn bs-btn--s" data-f="test">▶ TEST</button>' : ''}</div>`).join('') +
-            `<div class="bs-row" style="gap:12px;padding-top:16px;border-top:2px solid var(--bs-wood-edge)"><span style="width:104px;font-size:16px;line-height:16px">MUTE ALL</span>${switchHtml('mute', a.muted, 'Mute all sound', true)}
-              <span class="bs-dim">SOUND IS ${a.muted ? 'OFF' : 'ON'} · ${key(g.muteLabel())} ANYWHERE</span></div>
-            <p class="bs-dim">MUSIC GAINS DRUMS IN COMBAT. SEA AMBIENCE FOLLOWS EFFECTS.</p>`;
+          body.innerHTML = [['master', t('MASTER')], ['music', t('MUSIC')], ['fx', t('EFFECTS')]].map(([k, l]) => `<div class="bs-row" style="gap:12px;font-size:16px;line-height:16px"><span style="width:104px">${l}</span>
+            <button class="bs-step" tabindex="-1" data-f="d-${k}" aria-label="${t('{0} down', l)}">◀</button><div class="bs-slider${a.muted ? ' is-muted' : ''}" role="slider" tabindex="0" data-f="v-${k}" aria-label="${l}" aria-valuemin="0" aria-valuemax="10" aria-valuenow="${a[k]}">${Array.from({ length: 10 }, (_, i) => `<span${i < a[k] ? ' class="is-on"' : ''}></span>`).join('')}</div>
+            <button class="bs-step" tabindex="-1" data-f="u-${k}" aria-label="${t('{0} up', l)}">▶</button><span style="width:44px;text-align:right;color:var(--${a.muted ? 'bs-trim' : 'bs-gold'})">${a[k] * 10}%</span>${k === 'fx' ? `<button class="bs-btn bs-btn--s" data-f="test">▶ ${t('TEST')}</button>` : ''}</div>`).join('') +
+            `<div class="bs-row" style="gap:12px;padding-top:16px;border-top:2px solid var(--bs-wood-edge)"><span style="width:104px;font-size:16px;line-height:16px">${t('MUTE ALL')}</span>${switchHtml('mute', a.muted, t('Mute all sound'), true)}
+              <span class="bs-dim">${a.muted ? t('SOUND IS OFF') : t('SOUND IS ON')} · ${key(g.muteLabel())} ${t('ANYWHERE')}</span></div>
+            <p class="bs-dim">${t('MUSIC GAINS DRUMS IN COMBAT. SEA AMBIENCE FOLLOWS EFFECTS.')}</p>`;
           for (const k of ['master', 'music', 'fx']) {
             acts['d-' + k] = () => set(k, a[k] - 1);
             acts['u-' + k] = () => set(k, a[k] + 1);
@@ -278,25 +279,25 @@ export function initScreens(g) {
         },
         controls() {
           const keys = g.keys(), L = props.listen, C = props.conflict, name = ui.layoutName();
-          const cap = (a) => `<button class="bs-keycap${a === L ? ' is-listening' : ''}${C && (a === C.action || a === C.other) ? ' is-conflict' : ''}" data-f="k-${a}" aria-label="Change key for ${actionLabel(a)}">${a === L ? 'PRESS A KEY…' : esc(keyLabel(C && a === C.action ? C.code : keys[a]))}</button>`;
-          body.innerHTML = `<div class="bs-row" style="justify-content:space-between"><span class="bs-dim">KEYS SHOWN FOR YOUR KEYBOARD${name ? ` : <span class="bs-gold">${name}</span>` : ''}</span><button class="bs-btn bs-btn--s" data-f="k-reset">RESET TO DEFAULTS</button></div>
+          const cap = (a) => `<button class="bs-keycap${a === L ? ' is-listening' : ''}${C && (a === C.action || a === C.other) ? ' is-conflict' : ''}" data-f="k-${a}" aria-label="${t('Change key for {0}', actionLabel(a))}">${a === L ? t('PRESS A KEY…') : esc(keyLabel(C && a === C.action ? C.code : keys[a]))}</button>`;
+          body.innerHTML = `<div class="bs-row" style="justify-content:space-between"><span class="bs-dim">${t('KEYS SHOWN FOR YOUR KEYBOARD')}${name ? ` : <span class="bs-gold">${name}</span>` : ''}</span><button class="bs-btn bs-btn--s" data-f="k-reset">${t('RESET TO DEFAULTS')}</button></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px">${KEY_ROWS.map(([ids, l]) => {
               const on = ids.includes(L) || (C && ids.includes(C.action)), bad = C && (ids.includes(C.action) || ids.includes(C.other));
-              return `<div class="bs-row bs-keyrow${on ? ' is-on' : ''}${bad ? ' is-bad' : ''}"><span>${l}</span><span class="bs-row" style="gap:4px">${ids.map(cap).join('')}</span></div>`;
+              return `<div class="bs-row bs-keyrow${on ? ' is-on' : ''}${bad ? ' is-bad' : ''}"><span>${t(l)}</span><span class="bs-row" style="gap:4px">${ids.map(cap).join('')}</span></div>`;
             }).join('')}</div>
-            ${L ? `<div class="bs-row bs-banner" style="box-shadow:inset 0 0 0 2px var(--bs-${props.note ? 'red' : 'gold'})"><span style="flex:1">${props.note ? `<span style="color:var(--bs-red)">${props.note}.</span> ` : ''}PRESS THE NEW KEY FOR <span class="bs-gold">${actionLabel(L)}</span></span><span class="bs-dim">${key('ESC')} CANCEL</span><button class="bs-btn bs-btn--s" data-f="k-cancel">CANCEL</button></div>` : ''}
-            ${C ? `<div class="bs-row bs-banner" role="alert" style="box-shadow:inset 0 0 0 2px var(--bs-red)"><span style="flex:1"><span style="color:var(--bs-red)">${esc(keyLabel(C.code))}</span> ALREADY SETS <span class="bs-gold">${actionLabel(C.other)}</span>. SWAP THEM ?</span><button class="bs-btn bs-btn--s" data-f="k-swap">SWAP KEYS</button><button class="bs-btn bs-btn--s" data-f="k-cancel">CANCEL</button></div>` : ''}`;
+            ${L ? `<div class="bs-row bs-banner" style="box-shadow:inset 0 0 0 2px var(--bs-${props.note ? 'red' : 'gold'})"><span style="flex:1">${props.note ? `<span style="color:var(--bs-red)">${t(props.note)}.</span> ` : ''}${t('PRESS THE NEW KEY FOR')} <span class="bs-gold">${actionLabel(L)}</span></span><span class="bs-dim">${key(t('ESC'))} ${t('CANCEL')}</span><button class="bs-btn bs-btn--s" data-f="k-cancel">${t('CANCEL')}</button></div>` : ''}
+            ${C ? `<div class="bs-row bs-banner" role="alert" style="box-shadow:inset 0 0 0 2px var(--bs-red)"><span style="flex:1"><span style="color:var(--bs-red)">${esc(keyLabel(C.code))}</span> ${t('ALREADY SETS')} <span class="bs-gold">${actionLabel(C.other)}</span>. ${t('SWAP THEM ?')}</span><button class="bs-btn bs-btn--s" data-f="k-swap">${t('SWAP KEYS')}</button><button class="bs-btn bs-btn--s" data-f="k-cancel">${t('CANCEL')}</button></div>` : ''}`;
           const save = (k) => { store.keys = k; g.rekey(); };
           const state = (listen, conflict, note, focus) => { Object.assign(props, { listen, conflict, note }); draw(focus); };
           for (const a of Object.keys(DEFAULT_KEYS)) acts['k-' + a] = () => state(a, null, '', 'k-' + a);
           acts['k-cancel'] = () => state(null, null, '', 'k-' + (L || C.action));
           acts['k-swap'] = () => { save(swapKeys(keys, C.action, C.other)); state(null, null, '', 'k-' + C.action); };
-          acts['k-reset'] = () => ui.modal({ title: 'RESET KEYS ?', text: 'EVERY KEY GOES BACK TO ITS DEFAULT.', buttons: [{ label: 'CANCEL', cancel: true }, { label: 'RESET TO DEFAULTS', danger: true, run: () => { save(DEFAULT_KEYS); state(null, null, '', 'k-reset'); } }] });
+          acts['k-reset'] = () => ui.modal({ title: t('RESET KEYS ?'), text: t('EVERY KEY GOES BACK TO ITS DEFAULT.'), buttons: [{ label: t('CANCEL'), cancel: true }, { label: t('RESET TO DEFAULTS'), danger: true, run: () => { save(DEFAULT_KEYS); state(null, null, '', 'k-reset'); } }] });
           props.grab = !L ? null : (e) => { // the next key down is the new one; Escape gives up
             if (e.repeat) return;
             if (e.code === 'Escape') return acts['k-cancel']();
             const r = rebind(keys, L, e.code);
-            if (r.reserved) return state(L, null, 'RESERVED KEY', 'k-' + L);
+            if (r.reserved) return state(L, null, tk('RESERVED KEY'), 'k-' + L);
             if (e.key.length === 1) store.keyNames = { ...store.keyNames, [e.code]: e.key }; // its label, for browsers that do not tell the layout
             if (r.conflict) return state(null, { action: L, other: r.conflict, code: e.code }, '', 'k-swap');
             save(r.keys);
@@ -306,21 +307,23 @@ export function initScreens(g) {
         display() {
           const d = store.display;
           const row = (l, sw, note) => `<div class="bs-row" style="gap:12px"><span style="width:176px;font-size:16px;line-height:16px">${l}</span>${sw}<span class="bs-dim">${note}</span></div>`;
-          body.innerHTML = row('FULLSCREEN', switchHtml('full', !!document.fullscreenElement, 'Fullscreen'), `ALSO ${key('F11')}`) + row('KEY HINTS BAR', switchHtml('hints', d.hints, 'Key hints bar'), 'THE STRIP AT THE BOTTOM IN GAME');
+          body.innerHTML = row(t('FULLSCREEN'), switchHtml('full', !!document.fullscreenElement, t('Fullscreen')), `${t('ALSO')} ${key('F11')}`) + row(t('KEY HINTS BAR'), switchHtml('hints', d.hints, t('Key hints bar')), t('THE STRIP AT THE BOTTOM IN GAME')) +
+            row(t('LANGUAGE'), `<div class="bs-seg" aria-label="${t('Language')}">${[['en', 'ENGLISH'], ['fr', 'FRANÇAIS']].map(([l, n]) => `<button data-f="lang-${l}" aria-pressed="${lang === l}">${n}</button>`).join('')}</div>`, '');
+          for (const l of ['en', 'fr']) acts['lang-' + l] = () => { setLang(l); g.rekey(); ui.refresh(); }; // the whole screen again: its title and tabs change too
           acts.full = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen())?.catch(() => {});
           acts.hints = () => { store.display = { hints: !d.hints }; g.rekey(); draw('hints'); };
         },
         profile() {
-          body.innerHTML = `<label class="bs-dim" for="set-name">CAPTAIN NAME</label>
-            <div class="bs-row" style="gap:8px"><input id="set-name" class="bs-field" data-f="name" maxlength="12" autocomplete="off" spellcheck="false" style="width:280px;height:40px;font-size:24px;letter-spacing:3px"><button class="bs-btn" data-f="roll">⟳ ROLL</button><button class="bs-btn" data-f="save">SAVE</button></div>
-            <p class="bs-dim">A TO Z, 12 LETTERS MAX. SCORES ALREADY ON THE BOARD KEEP THE NAME THEY WERE SIGNED WITH.</p>`;
+          body.innerHTML = `<label class="bs-dim" for="set-name">${t('CAPTAIN NAME')}</label>
+            <div class="bs-row" style="gap:8px"><input id="set-name" class="bs-field" data-f="name" maxlength="12" autocomplete="off" spellcheck="false" style="width:280px;height:40px;font-size:24px;letter-spacing:3px"><button class="bs-btn" data-f="roll">⟳ ${t('ROLL')}</button><button class="bs-btn" data-f="save">${t('SAVE')}</button></div>
+            <p class="bs-dim">${t('A TO Z, 12 LETTERS MAX. SCORES ALREADY ON THE BOARD KEEP THE NAME THEY WERE SIGNED WITH.')}</p>`;
           const input = body.querySelector('input'), btn = body.querySelector('[data-f=save]');
           const show = () => { btn.disabled = !input.value || input.value === store.name; };
           input.value = store.name;
           input.oninput = () => { const v = cleanName(input.value); if (v !== input.value) input.value = v; show(); };
           show();
           acts.roll = () => { input.value = rollName(); show(); };
-          acts.save = () => { if (btn.disabled) return; store.name = input.value; show(); ui.focus('name'); ui.toast('ok', 'NAME SAVED · ' + input.value); };
+          acts.save = () => { if (btn.disabled) return; store.name = input.value; show(); ui.focus('name'); ui.toast('ok', t('NAME SAVED · {0}', input.value)); };
           props.field = input;
         },
       };
@@ -372,22 +375,22 @@ export function initScreens(g) {
       const best = (b) => { const l = lists[b], i = Array.isArray(l) ? l.findIndex(yours) : -1; return i < 0 ? '–' : `<span class="bs-gold">#${i + 1}</span>`; };
       const seg = (f, on, label) => `<button data-f="${f}" aria-pressed="${on}">${label}</button>`;
       const line = (r, i) => `<div class="bs-lb-item${i === you ? ' is-you' : ''}" tabindex="0" data-f="r${i}"${i === Math.max(you, 0) ? ' data-first' : ''}><div class="bs-lb-row"><span>${i + 1}</span>
-        <span class="bs-row" style="gap:8px;min-width:0">${esc(r.crew[0].name)}${r.crew.length > 1 ? `<span class="bs-badge bs-badge--off">+${r.crew.length - 1}</span>` : ''}${i === you ? `<span class="bs-badge bs-badge--you">${r.crew.length > 1 ? 'YOUR CREW' : 'YOU'}</span>` : ''}</span>
+        <span class="bs-row" style="gap:8px;min-width:0">${esc(r.crew[0].name)}${r.crew.length > 1 ? `<span class="bs-badge bs-badge--off">+${r.crew.length - 1}</span>` : ''}${i === you ? `<span class="bs-badge bs-badge--you">${r.crew.length > 1 ? t('YOUR CREW') : t('YOU')}</span>` : ''}</span>
         <span class="bs-row" style="gap:4px">${r.crew.map((c) => `<span class="bs-ship-chip bs-ship-chip--${CHIP[c.ship] ? c.ship : 'wasp'}">${CHIP[c.ship] || '?'}</span>`).join('')}</span><span>${+r.wave}</span><span>${num(r.gold)}</span><span>×${+r.combo}</span></div>
         ${r.crew.length > 1 ? `<div class="bs-lb-crew">${r.crew.map((c) => `<span class="bs-row"><span${c.name === name ? ' class="bs-gold"' : ''}>${esc(c.name)}</span><span class="bs-dim">${esc(String(c.ship).toUpperCase())}</span></span>`).join('')}</div>` : ''}</div>`;
-      el.innerHTML = `${head(90, 20, [props.from || 'MENU', 'LEADERBOARD'], 1, 'HALL OF INFAMY')}
+      el.innerHTML = `${head(90, 20, [t(props.from || 'MENU'), t('LEADERBOARD')], 1, t('HALL OF INFAMY'))}
         <div class="bs-abs bs-row" style="left:90px;top:84px;width:780px;justify-content:space-between;align-items:flex-end">
-          <div class="bs-tabs" role="tablist" data-group>${['waves', 'convoy'].map((id) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.mode}">${MODE[id].name}</button>`).join('')}</div>
-          <div class="bs-row" style="gap:12px;padding-bottom:4px"><div class="bs-seg" data-group aria-label="Crew size">${seg('solo', !props.crew, 'SOLO')}${seg('crew', !!props.crew, 'CREW')}</div>
-            <div class="bs-seg" data-group aria-label="Scope">${seg('world', !props.local, 'WORLD')}${seg('local', !!props.local, 'THIS BROWSER')}</div></div></div>
+          <div class="bs-tabs" role="tablist" data-group>${['waves', 'convoy'].map((id) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.mode}">${t(MODE[id].name)}</button>`).join('')}</div>
+          <div class="bs-row" style="gap:12px;padding-bottom:4px"><div class="bs-seg" data-group aria-label="${t('Crew size')}">${seg('solo', !props.crew, 'SOLO')}${seg('crew', !!props.crew, t('CREW'))}</div>
+            <div class="bs-seg" data-group aria-label="${t('Scope')}">${seg('world', !props.local, t('WORLD'))}${seg('local', !!props.local, t('THIS BROWSER'))}</div></div></div>
         <div class="bs-abs bs-panel bs-col" style="left:90px;top:119px;width:780px;height:368px;padding:12px 16px;gap:2px">
-          <div class="bs-lb-row bs-dim" style="font-size:8px;line-height:12px;border-bottom:2px solid var(--bs-wood-edge)"><span>#</span><span>${props.crew ? 'CREW' : 'CAPTAIN'}</span><span>${props.crew ? 'SHIPS' : 'SHIP'}</span><span>${m.unit}</span><span>GOLD</span><span>COMBO</span></div>
+          <div class="bs-lb-row bs-dim" style="font-size:8px;line-height:12px;border-bottom:2px solid var(--bs-wood-edge)"><span>#</span><span>${props.crew ? t('CREW') : t('CAPTAIN')}</span><span>${props.crew ? t('SHIPS') : t('SHIP')}</span><span>${t(m.unit)}</span><span>${t('GOLD')}</span><span>COMBO</span></div>
           <div id="lb-rows" class="bs-col" data-group style="flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;gap:2px">${
-            rows === 'fail' ? '<p class="bs-alert" role="alert" style="padding:12px 8px"><b>✕</b> WORLD BOARD UNREACHABLE. THIS BROWSER STILL HAS YOUR RUNS.</p>'
-            : !rows ? '<p class="bs-dim" style="padding:12px 8px">◌ READING THE WORLD BOARD…</p>'
-            : rows.length ? rows.map(line).join('') : `<p class="bs-dim" style="padding:12px 8px">NO ${props.crew ? 'CREW' : 'SOLO'} RUN SIGNED YET.</p>`}</div>
-          <div class="bs-row bs-dim" style="justify-content:space-between;padding:6px 8px 0;border-top:2px solid var(--bs-wood-edge)"><span>${props.local ? 'THIS BROWSER · TOP 10' : 'WORLD TOP 100'} · CREW SCORES RANKED APART FROM SOLO</span>
-            <span>YOUR BEST · SOLO ${best(props.mode)} · CREW ${best(props.mode + '-crew')}</span></div></div>`;
+            rows === 'fail' ? `<p class="bs-alert" role="alert" style="padding:12px 8px"><b>✕</b> ${t('WORLD BOARD UNREACHABLE. THIS BROWSER STILL HAS YOUR RUNS.')}</p>`
+            : !rows ? `<p class="bs-dim" style="padding:12px 8px">◌ ${t('READING THE WORLD BOARD…')}</p>`
+            : rows.length ? rows.map(line).join('') : `<p class="bs-dim" style="padding:12px 8px">${props.crew ? t('NO CREW RUN SIGNED YET.') : t('NO SOLO RUN SIGNED YET.')}</p>`}</div>
+          <div class="bs-row bs-dim" style="justify-content:space-between;padding:6px 8px 0;border-top:2px solid var(--bs-wood-edge)"><span>${props.local ? t('THIS BROWSER · TOP 10') : t('WORLD TOP 100')} · ${t('CREW SCORES RANKED APART FROM SOLO')}</span>
+            <span>${t('YOUR BEST')} · SOLO ${best(props.mode)} · ${t('CREW')} ${best(props.mode + '-crew')}</span></div></div>`;
       const box = el.querySelector('#lb-rows');
       for (const r of box.querySelectorAll('.bs-lb-item')) r.onfocus = () => { // keep the focused row in view (not scrollIntoView: it would scroll the stage too)
         if (r.offsetTop < box.scrollTop) box.scrollTop = r.offsetTop;
@@ -407,7 +410,7 @@ export function initScreens(g) {
   };
 
   // 06 · online hub: quick match, create a room, join one. Network messages are toasts; a bad code is said under the field
-  const QUICK = [['coop-waves', 'CO-OP · WAVES', 'HOLD THE LINE TOGETHER'], ['coop-convoy', 'CO-OP · CONVOY', 'RAID THE MERCHANTS'], ['pvp', 'PVP', 'FIRST TO 10 SINKINGS · 5 MIN']];
+  const QUICK = [['coop-waves', tk('CO-OP · WAVES'), tk('HOLD THE LINE TOGETHER')], ['coop-convoy', tk('CO-OP · CONVOY'), tk('RAID THE MERCHANTS')], ['pvp', 'PVP', tk('FIRST TO 10 SINKINGS · 5 MIN')]];
   screens.online = {
     veil: 0.5, shot: () => ({ wide: true }),
     hints: [[['←', '→'], 'COLUMN'], [['↑', '↓'], 'CHOOSE'], [['ENTER'], 'GO'], [['ESC'], 'BACK']],
@@ -415,19 +418,19 @@ export function initScreens(g) {
       props.code ??= '';
       const { off, busy, err } = g.hub();
       const at = (f) => (busy === f ? ' aria-busy="true"' : off || busy ? ' disabled' : '');
-      el.innerHTML = `${head(90, 28, ['MENU', 'ONLINE'], 1, 'GATHER A CREW')}
-        <div class="bs-abs bs-chip" style="right:90px;top:48px"><i style="width:6px;height:6px;background:var(--bs-${off ? 'red' : 'green'})"></i>${off ? 'ONLINE UNAVAILABLE · SOLO STILL WORKS' : `<span>CONNECTED AS <span class="bs-gold">${esc(store.name)}</span></span>`}</div>
+      el.innerHTML = `${head(90, 28, ['MENU', t('ONLINE')], 1, t('GATHER A CREW'))}
+        <div class="bs-abs bs-chip" style="right:90px;top:48px"><i style="width:6px;height:6px;background:var(--bs-${off ? 'red' : 'green'})"></i>${off ? t('ONLINE UNAVAILABLE · SOLO STILL WORKS') : `<span>${t('CONNECTED AS')} <span class="bs-gold">${esc(store.name)}</span></span>`}</div>
         <div class="bs-abs" style="left:90px;top:104px;width:780px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:stretch">
-          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2 bs-gold">QUICK MATCH</h2><p class="bs-dim">SAIL WITH STRANGERS. THE SHIP LEAVES 15 S AFTER THE ROOM OPENS, FULL OR NOT.</p>
-            <div class="bs-menu">${QUICK.map(([q, l, sub], i) => `<button class="bs-btn" data-f="q-${q}"${i ? '' : ' data-first'}${at('q-' + q)}><span>${l}</span><span>${sub}</span></button>`).join('')}</div></section>
-          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2">CREATE A ROOM</h2><p class="bs-dim">PRIVATE. FRIENDS JOIN WITH A 4-LETTER CODE. YOU PICK THE MODE INSIDE AND SET SAIL WHEN READY.</p>
+          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2 bs-gold">${t('QUICK MATCH')}</h2><p class="bs-dim">${t('SAIL WITH STRANGERS. THE SHIP LEAVES 15 S AFTER THE ROOM OPENS, FULL OR NOT.')}</p>
+            <div class="bs-menu">${QUICK.map(([q, l, sub], i) => `<button class="bs-btn" data-f="q-${q}"${i ? '' : ' data-first'}${at('q-' + q)}><span>${t(l)}</span><span>${t(sub)}</span></button>`).join('')}</div></section>
+          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2">${t('CREATE A ROOM')}</h2><p class="bs-dim">${t('PRIVATE. FRIENDS JOIN WITH A 4-LETTER CODE. YOU PICK THE MODE INSIDE AND SET SAIL WHEN READY.')}</p>
             <div style="flex:1;display:grid;place-items:center;min-height:56px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-wood-hi);font-size:24px;line-height:24px;letter-spacing:6px;color:var(--bs-wood-hi)">? ? ? ?</div>
-            <button class="bs-btn" data-f="create" style="align-self:center"${at('create')}>CREATE ROOM</button></section>
-          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2">JOIN A ROOM</h2><p class="bs-dim">TYPE THE CODE YOUR CAPTAIN GAVE YOU. PASTE WORKS TOO.</p>
-            <label class="bs-dim" for="room-code">ROOM CODE</label>
+            <button class="bs-btn" data-f="create" style="align-self:center"${at('create')}>${t('CREATE ROOM')}</button></section>
+          <section class="bs-panel bs-col" data-group style="padding:16px;gap:10px"><h2 class="bs-h2">${t('JOIN A ROOM')}</h2><p class="bs-dim">${t('TYPE THE CODE YOUR CAPTAIN GAVE YOU. PASTE WORKS TOO.')}</p>
+            <label class="bs-dim" for="room-code">${t('ROOM CODE')}</label>
             <div class="bs-codein${err ? ' is-bad' : ''}"><span></span><span></span><span></span><span></span><input id="room-code" data-f="code" data-nocaret maxlength="8" autocomplete="off" spellcheck="false" aria-describedby="code-err"${err ? ' aria-invalid="true"' : ''}${off || busy ? ' disabled' : ''}></div>
             <p id="code-err" class="bs-alert" role="alert" style="min-height:24px">${err ? `<b>✕</b> ${esc(err)}` : ''}</p>
-            <button class="bs-btn" data-f="join" style="align-self:center"${at('join')}>JOIN</button></section></div>`;
+            <button class="bs-btn" data-f="join" style="align-self:center"${at('join')}>${t('JOIN')}</button></section></div>`;
       const input = el.querySelector('#room-code'), join = el.querySelector('[data-f=join]'), cells = [...el.querySelectorAll('.bs-codein span')];
       const show = () => { cells.forEach((c, i) => (c.textContent = props.code[i] || '')); if (!busy) join.disabled = off || props.code.length < 4; };
       input.value = props.code;
@@ -440,40 +443,40 @@ export function initScreens(g) {
   };
 
   // 07 · lobby: the room's code or the quick-match clock, the mode, four seats, your ship. The host sets sail; guests say READY
-  const LOBBY_MODE = { waves: ['WAVES', 'HOLD THE LINE TOGETHER'], convoy: ['CONVOY', 'RAID THE MERCHANTS'], pvp: ['PVP', 'FIRST TO 10 SINKINGS OR BEST SCORE AFTER 5 MIN'] };
+  const LOBBY_MODE = { waves: [tk('WAVES'), tk('HOLD THE LINE TOGETHER')], convoy: [tk('CONVOY'), tk('RAID THE MERCHANTS')], pvp: ['PVP', tk('FIRST TO 10 SINKINGS OR BEST SCORE AFTER 5 MIN')] };
   screens.lobby = {
     veil: 0.5, shot: () => ({ wide: true }),
     hints() { const L = g.lobby(); return [[['1', '2', '3'], 'SHIP'], [['ENTER'], L.host && !L.quick ? 'SET SAIL' : 'READY'], ...(L.quick ? [] : [[['C'], 'COPY CODE']]), [['ESC'], 'LEAVE']]; },
     render(el, props) {
-      const L = g.lobby(), n = L.players.length, you = L.players.find((p) => p.pid === L.me), cap = L.players[0]?.name || 'THE CAPTAIN';
+      const L = g.lobby(), n = L.players.length, you = L.players.find((p) => p.pid === L.me), cap = L.players[0]?.name || t('THE CAPTAIN');
       const ready = L.players.filter((p) => p.ready).length, canSail = L.host && !L.quick;
       const seat = (p, i) => {
         if (!p) {
-          const [text, hint] = L.quick ? ['SEARCHING…', 'ANYONE CAN STILL JOIN'] : L.host ? ['WAITING FOR A PIRATE…', i === n ? `SHARE THE CODE ${L.code}` : ''] : ['OPEN SEAT', ''];
-          return `<div class="bs-slot is-empty"><span>SEAT ${i + 1}</span><span style="font-size:16px;line-height:20px">${text}</span><span style="color:var(--bs-trim)">${hint}</span></div>`;
+          const [text, hint] = L.quick ? [t('SEARCHING…'), t('ANYONE CAN STILL JOIN')] : L.host ? [t('WAITING FOR A PIRATE…'), i === n ? t('SHARE THE CODE {0}', L.code) : ''] : [t('OPEN SEAT'), ''];
+          return `<div class="bs-slot is-empty"><span>${t('SEAT {0}', i + 1)}</span><span style="font-size:16px;line-height:20px">${text}</span><span style="color:var(--bs-trim)">${hint}</span></div>`;
         }
-        const me = p.pid === L.me, captain = p.pid === 0, badge = captain && me ? 'CAPTAIN · YOU' : captain ? 'CAPTAIN' : me ? 'YOU' : '';
-        return `<div class="bs-slot${me ? ' is-you' : ''}"><div class="bs-row" style="justify-content:space-between;height:12px"><span class="bs-dim">SEAT ${i + 1}</span>${badge ? `<span class="bs-badge${captain ? '' : ' bs-badge--you'}">${badge}</span>` : ''}</div>
+        const me = p.pid === L.me, captain = p.pid === 0, badge = captain && me ? t('CAPTAIN · YOU') : captain ? t('CAPTAIN') : me ? t('YOU') : '';
+        return `<div class="bs-slot${me ? ' is-you' : ''}"><div class="bs-row" style="justify-content:space-between;height:12px"><span class="bs-dim">${t('SEAT {0}', i + 1)}</span>${badge ? `<span class="bs-badge${captain ? '' : ' bs-badge--you'}">${badge}</span>` : ''}</div>
           <div style="height:92px;display:grid;place-items:center;background:var(--bs-sea-1);box-shadow:inset 0 0 0 2px var(--bs-wood-edge);overflow:hidden">${p.ship === null ? '<span style="font-size:32px;line-height:32px;color:var(--bs-wood-hi)">?</span>' : `<img src="${g.thumb(p.ship)}" width="100" height="70" alt="${g.ships[p.ship].name}">`}</div>
-          <span${me ? ' class="bs-gold"' : ''} style="font-size:16px;line-height:16px">${esc(p.name)}</span><span class="bs-dim">${p.ship === null ? 'NO SHIP YET' : g.ships[p.ship].name}</span>
-          <span class="bs-status bs-status--${p.ready ? 'ready' : 'picking'}">${p.ready ? '✓ READY' : p.ship === null ? 'PICKING A SHIP' : 'NOT READY'}</span></div>`;
+          <span${me ? ' class="bs-gold"' : ''} style="font-size:16px;line-height:16px">${esc(p.name)}</span><span class="bs-dim">${p.ship === null ? t('NO SHIP YET') : g.ships[p.ship].name}</span>
+          <span class="bs-status bs-status--${p.ready ? 'ready' : 'picking'}">${p.ready ? '✓ ' + t('READY') : p.ship === null ? t('PICKING A SHIP') : t('NOT READY')}</span></div>`;
       };
-      el.innerHTML = `<div class="bs-abs bs-col" style="left:90px;top:20px;gap:4px"><div class="bs-crumb">ONLINE ▸ ${L.quick ? 'QUICK MATCH' : 'PRIVATE ROOM'}</div><h1 class="bs-h1">${L.quick ? 'QUICK MATCH' : `ROOM ${L.code}`}</h1>
-          <span class="bs-dim">${L.quick ? `${LOBBY_MODE[L.mode][0]} · ROOM ${L.code} · ${n}/4 PIRATES` : `${n}/4 PIRATES ABOARD`}${L.started ? ' · RUN UNDER WAY' : ''}</span></div>
-        ${L.quick ? `<div class="bs-abs bs-panel bs-panel--gold bs-col" style="right:90px;top:16px;width:268px;padding:10px 12px;gap:6px"><div class="bs-row" style="justify-content:space-between;height:40px"><span style="font-size:16px;line-height:16px;letter-spacing:1px">${L.countdown === null ? 'WAITING FOR PIRATES…' : 'SETTING SAIL IN'}</span>
+      el.innerHTML = `<div class="bs-abs bs-col" style="left:90px;top:20px;gap:4px"><div class="bs-crumb">${t('ONLINE')} ▸ ${L.quick ? t('QUICK MATCH') : t('PRIVATE ROOM')}</div><h1 class="bs-h1">${L.quick ? t('QUICK MATCH') : t('ROOM {0}', L.code)}</h1>
+          <span class="bs-dim">${L.quick ? `${t(LOBBY_MODE[L.mode][0])} · ${t('ROOM {0}', L.code)} · ${t('{0}/4 PIRATES', n)}` : t('{0}/4 PIRATES ABOARD', n)}${L.started ? ' · ' + t('RUN UNDER WAY') : ''}</span></div>
+        ${L.quick ? `<div class="bs-abs bs-panel bs-panel--gold bs-col" style="right:90px;top:16px;width:268px;padding:10px 12px;gap:6px"><div class="bs-row" style="justify-content:space-between;height:40px"><span style="font-size:16px;line-height:16px;letter-spacing:1px">${L.countdown === null ? t('WAITING FOR PIRATES…') : t('SETTING SAIL IN')}</span>
             <span class="bs-gold" style="font-size:40px;line-height:40px;font-weight:700">${L.countdown ?? ''}</span></div><div style="display:grid;grid-template-columns:repeat(15,1fr);gap:2px">${Array.from({ length: 15 }, (_, i) => `<i style="height:8px;background:var(--bs-${i < (L.countdown ?? 0) ? 'gold' : 'wood-edge'})"></i>`).join('')}</div></div>`
-        : `<div class="bs-abs bs-panel bs-col" style="right:90px;top:12px;padding:8px 12px;gap:4px;align-items:flex-end"><span class="bs-dim" style="letter-spacing:1px">ROOM CODE</span>
-            <div class="bs-row" style="gap:8px"><div class="bs-code">${[...L.code].map((c) => `<span>${c}</span>`).join('')}</div><button class="bs-btn bs-btn--s" data-f="copy" aria-label="Copy room code" style="height:36px;background:var(--bs-wood-hi)">${props.copied ? '✓ COPIED' : 'COPY'}</button></div></div>`}
+        : `<div class="bs-abs bs-panel bs-col" style="right:90px;top:12px;padding:8px 12px;gap:4px;align-items:flex-end"><span class="bs-dim" style="letter-spacing:1px">${t('ROOM CODE')}</span>
+            <div class="bs-row" style="gap:8px"><div class="bs-code">${[...L.code].map((c) => `<span>${c}</span>`).join('')}</div><button class="bs-btn bs-btn--s" data-f="copy" aria-label="${t('Copy room code')}" style="height:36px;background:var(--bs-wood-hi)">${props.copied ? '✓ ' + t('COPIED') : t('COPY')}</button></div></div>`}
         <div class="bs-abs bs-row" style="left:90px;top:116px;width:780px;gap:8px"><span class="bs-dim" style="margin-right:4px">MODE</span>
-          ${(L.quick ? [L.mode] : ['waves', 'convoy', 'pvp']).map((m) => `<button class="bs-btn bs-btn--s" data-f="m-${m}" aria-pressed="${m === L.mode}"${canSail && !L.started ? '' : ' disabled'} style="padding:6px 12px">${LOBBY_MODE[m][0]}</button>`).join('')}
-          <span class="bs-dim" style="margin-left:4px">${L.quick ? LOBBY_MODE[L.mode][1] : L.host ? 'ONLY YOU CAN CHANGE IT' : 'THE CAPTAIN CHOOSES'}</span></div>
+          ${(L.quick ? [L.mode] : ['waves', 'convoy', 'pvp']).map((m) => `<button class="bs-btn bs-btn--s" data-f="m-${m}" aria-pressed="${m === L.mode}"${canSail && !L.started ? '' : ' disabled'} style="padding:6px 12px">${t(LOBBY_MODE[m][0])}</button>`).join('')}
+          <span class="bs-dim" style="margin-left:4px">${L.quick ? t(LOBBY_MODE[L.mode][1]) : L.host ? t('ONLY YOU CAN CHANGE IT') : t('THE CAPTAIN CHOOSES')}</span></div>
         <div class="bs-abs" style="left:90px;top:152px;width:780px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px">${[0, 1, 2, 3].map((i) => seat(L.players[i], i)).join('')}</div>
-        <div class="bs-abs bs-row" style="left:90px;top:376px;width:780px;gap:8px"><span class="bs-dim" style="margin-right:4px">YOUR SHIP</span>
+        <div class="bs-abs bs-row" style="left:90px;top:376px;width:780px;gap:8px"><span class="bs-dim" style="margin-right:4px">${t('YOUR SHIP')}</span>
           ${g.ships.map((s, i) => `<button class="bs-btn bs-row" data-f="s${i}" aria-pressed="${you?.ship === i}"${i === (you?.ship ?? SHIPS.indexOf(store.lastShip)) && !canSail ? ' data-first' : ''} style="gap:8px;padding:6px 12px">${key(i + 1)}${s.name}</button>`).join('')}
-          ${L.host ? '' : `<button class="bs-btn bs-ready" data-f="ready" aria-pressed="${!!you?.ready}" style="margin-left:auto;padding:6px 12px">${you?.ready ? '✓ READY' : L.started ? '▶ JOIN THE RUN' : 'READY'}</button>`}</div>
-        <div class="bs-abs bs-row" style="left:90px;top:424px;width:780px;justify-content:space-between"><button class="bs-btn" data-f="leave">◀ LEAVE ROOM</button>
-          ${canSail ? `<button class="bs-btn bs-btn--primary" data-f="sail" data-first>${n === 1 ? 'SET SAIL ALONE · 1/4' : ready === n ? 'SET SAIL · ALL READY' : `SET SAIL · ${ready}/${n} READY`} ▶</button>`
-          : `<span class="bs-dim" style="padding:8px 12px;font-size:16px;line-height:16px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-wood-hi)">${L.quick ? 'NOT PICKED AT 0 = YOUR LAST SHIP' : L.started ? 'READY PUTS YOUR SHIP TO SEA' : `WAITING FOR ${esc(cap)} TO SET SAIL…`}</span>`}</div>`;
+          ${L.host ? '' : `<button class="bs-btn bs-ready" data-f="ready" aria-pressed="${!!you?.ready}" style="margin-left:auto;padding:6px 12px">${you?.ready ? '✓ ' + t('READY') : L.started ? '▶ ' + t('JOIN THE RUN') : t('READY')}</button>`}</div>
+        <div class="bs-abs bs-row" style="left:90px;top:424px;width:780px;justify-content:space-between"><button class="bs-btn" data-f="leave">◀ ${t('LEAVE ROOM')}</button>
+          ${canSail ? `<button class="bs-btn bs-btn--primary" data-f="sail" data-first>${n === 1 ? t('SET SAIL ALONE · 1/4') : ready === n ? t('SET SAIL · ALL READY') : t('SET SAIL · {0}/{1} READY', ready, n)} ▶</button>`
+          : `<span class="bs-dim" style="padding:8px 12px;font-size:16px;line-height:16px;background:var(--bs-wood-edge);box-shadow:inset 0 0 0 2px var(--bs-wood-hi)">${L.quick ? t('NOT PICKED AT 0 = YOUR LAST SHIP') : L.started ? t('READY PUTS YOUR SHIP TO SEA') : t('WAITING FOR {0} TO SET SAIL…', esc(cap))}</span>`}</div>`;
       const copy = () => navigator.clipboard?.writeText(L.code).then(() => { props.copied = true; ui.refresh(); setTimeout(() => { props.copied = false; if (ui.top() === 'lobby') ui.refresh(); }, 2000); }, () => {});
       const acts = { copy, leave: () => g.leave(), ready: g.lobbyReady, sail: g.lobbyStart, s0: () => g.lobbyPick(0), s1: () => g.lobbyPick(1), s2: () => g.lobbyPick(2) };
       for (const m of ['waves', 'convoy', 'pvp']) acts['m-' + m] = () => g.lobbyMode(m);
@@ -497,11 +500,11 @@ export function initScreens(g) {
     veil: 0.72,
     hints: [[['←', '→'], 'CHOOSE'], [['ESC'], 'MAIN MENU']],
     render(el, props) {
-      el.innerHTML = `<div class="bs-abs bs-panel bs-col" role="dialog" aria-label="Match over" style="left:260px;top:72px;width:440px;padding:20px 28px;gap:12px;align-items:center">
-        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(--bs-${props.won ? 'gold' : 'red'});text-shadow:3px 3px 0 var(--bs-wood-edge)">${props.won ? 'VICTORY' : 'SUNK'}</h1>
-          <span class="bs-dim" style="letter-spacing:1px">PVP · ${esc(props.rows[0].name)} WINS · ${props.rows[0].kills} SINKINGS</span></div>
+      el.innerHTML = `<div class="bs-abs bs-panel bs-col" role="dialog" aria-label="${t('Match over')}" style="left:260px;top:72px;width:440px;padding:20px 28px;gap:12px;align-items:center">
+        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(--bs-${props.won ? 'gold' : 'red'});text-shadow:3px 3px 0 var(--bs-wood-edge)">${props.won ? t('VICTORY') : t('SUNK')}</h1>
+          <span class="bs-dim" style="letter-spacing:1px">PVP · ${tn(props.rows[0].kills, '{0} WINS · {1} SINKING', '{0} WINS · {1} SINKINGS', esc(props.rows[0].name), props.rows[0].kills)}</span></div>
         <div class="bs-col" style="gap:2px;align-self:stretch">${props.rows.map((r, i) => `<div class="bs-over-row${r.you ? ' is-you' : ''}" style="grid-template-columns:36px minmax(0,1fr) 120px 48px"><span>${i + 1}</span><span>${esc(r.name)}</span><span>${esc(r.ship)}</span><span>${+r.kills}</span></div>`).join('')}</div>
-        <div class="bs-row" style="gap:8px;align-self:stretch;justify-content:space-between">${props.host ? '<button class="bs-btn" data-f="again" data-first>▶ REMATCH</button>' : `<span class="bs-dim">WAITING FOR ${esc(props.captain)} TO START A REMATCH…</span>`}<button class="bs-btn" data-f="menu">MAIN MENU</button></div></div>`;
+        <div class="bs-row" style="gap:8px;align-self:stretch;justify-content:space-between">${props.host ? `<button class="bs-btn" data-f="again" data-first>▶ ${t('REMATCH')}</button>` : `<span class="bs-dim">${t('WAITING FOR {0} TO START A REMATCH…', esc(props.captain))}</span>`}<button class="bs-btn" data-f="menu">${t('MAIN MENU')}</button></div></div>`;
       const acts = { again: g.rematch, menu: () => g.reboot('menu') };
       return { acts, back: acts.menu };
     },

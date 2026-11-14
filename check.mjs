@@ -1,6 +1,6 @@
 // node check.mjs — asserts on the pure sim, and on what the menus store.
 import assert from 'node:assert/strict';
-import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul } from './sim.js';
+import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, SKILLS, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul } from './sim.js';
 
 WIND.k = 0; // the checks below are written for still air; the wind block turns it back on
 
@@ -520,5 +520,40 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
     assert.equal(p.hp, p.maxHp, `${PLAYER_SHIPS[i].name} should dodge the slam upwind`);
   }
   WIND.a = wa;
+}
+// i18n: every key the code shows has a French text with the same {n} holes
+{
+  const { readFileSync } = await import('node:fs');
+  const { FR, t, tn, say, setLang } = await import('./i18n.js');
+  const keys = new Set();
+  const STR = String.raw`'((?:[^'\\]|\\.)*)'`, un = (k) => k.replace(/\\(.)/g, '$1');
+  for (const f of ['game.js', 'screens.js', 'ui.js', 'index.html']) {
+    const src = readFileSync(new URL(f, import.meta.url), 'utf8');
+    for (const m of src.matchAll(new RegExp(String.raw`\bt[k]?\(\s*${STR}`, 'g'))) keys.add(un(m[1]));
+    for (const m of src.matchAll(new RegExp(String.raw`\btn\([^,]+,\s*${STR},\s*${STR}`, 'g'))) keys.add(un(m[1])).add(un(m[2]));
+    for (const m of src.matchAll(new RegExp(String.raw`\], ${STR}\]`, 'g'))) keys.add(un(m[1])); // [[keys], 'LABEL']: hint bars and KEY_ROWS, translated where they are drawn
+    for (const m of src.matchAll(/data-t="([^"]+)"/g)) keys.add(m[1]);
+  }
+  for (const u of UPGRADES) keys.add(u.label);
+  for (const k of Object.values(SKILLS)) keys.add(k.name).add(k.desc);
+  for (const s of PLAYER_SHIPS) keys.add(s.blurb);
+  assert.ok(keys.size > 300, 'the scan found too few keys: ' + keys.size);
+  const holes = (x) => (x.match(/\{\d\}/g) || []).sort().join();
+  for (const k of keys) {
+    assert.ok(Object.hasOwn(FR, k), 'no French text for: ' + k);
+    assert.equal(holes(FR[k]), holes(k), 'holes differ in the French text of: ' + k);
+  }
+  assert.deepEqual(Object.keys(FR).filter((k) => !keys.has(k)), [], 'French texts nothing shows any more');
+  setLang('en');
+  assert.equal(t('WAVE {0}', 3), 'WAVE 3');
+  assert.equal(t('constructor'), 'constructor', 'a key is looked up among own entries only');
+  setLang('fr');
+  assert.equal(t('WAVE {0}', 3), 'VAGUE 3');
+  assert.equal(t('NOT A KEY'), 'NOT A KEY', 'a missing entry falls back to English');
+  assert.equal(say(['{0} SANK {1}', 'ANNE', 'KIDD']), 'ANNE A COULÉ KIDD');
+  assert.equal(say('P2 WINS'), 'P2 WINS');
+  assert.equal(tn(0, '{0} WINS · {1} SINKING', '{0} WINS · {1} SINKINGS', 'ANNE', 0), 'ANNE GAGNE · 0 NAVIRE COULÉ', 'French counts 0 as one');
+  setLang('en');
+  assert.equal(tn(0, '{0} WINS · {1} SINKING', '{0} WINS · {1} SINKINGS', 'ANNE', 0), 'ANNE WINS · 0 SINKINGS');
 }
 console.log('check ok');

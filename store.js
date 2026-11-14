@@ -1,4 +1,4 @@
-// What the browser remembers, under `broadside.`: name, last mode and ship, audio, keys, display, local boards.
+// What the browser remembers, under `broadside.`: name, last mode and ship, audio, keys, display, language, local boards.
 // Every read falls back to its default: storage can be missing (private window, node in check.mjs).
 const P = 'broadside.';
 const raw = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -87,5 +87,8 @@ export const store = {
   set keyNames(n) { set('keyNames', n); },
   get display() { return { hints: get('display')?.hints !== false }; },
   set display(d) { set('display', d); },
+  // 'en' | 'fr'; until the player chooses, the browser's language
+  get lang() { const l = get('lang'); return l === 'en' || l === 'fr' ? l : typeof navigator !== 'undefined' && /^fr/i.test(navigator.language || '') ? 'fr' : 'en'; },
+  set lang(v) { set('lang', v); },
   get best() { return loadBest(); },
 };

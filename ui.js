@@ -1,6 +1,7 @@
 // Menu shell: a 960×540 logical stage scaled by a whole number of device pixels, a stack of screens, and one
 // focused element at a time (the mouse moves the same focus the arrows do). Screens live in screens.js.
 import { store } from './store.js';
+import { t as tr, tk } from './i18n.js'; // tr: `t` is the top screen in here
 
 const W = 960, H = 540;
 const $ = (id) => document.getElementById(id);
@@ -17,6 +18,7 @@ addEventListener('resize', fit);
 fit();
 
 // screens[id] = { veil: 0..1, hints: [[keys, label]…] | (props) => …, shot: (props) => camera framing for game.js, back: false (no way back),
+//   hint keys and labels are English, translated when the bar is drawn (i18n.js).
 //   render(el, props) → { acts: { [data-f]: fn(el) }, keys(e) → true when handled, back(), tab(dir), close() } }
 export const screens = {};
 const stack = []; // { id, props, focus, h }
@@ -51,7 +53,7 @@ function mount(fresh, keep) {
     t.h = def.render(el, t.props) || {};
     if (def.veil) veil.style.background = `rgba(12, 33, 64, ${def.veil})`;
     const hints = typeof def.hints === 'function' ? def.hints(t.props) : def.hints;
-    hintsEl.innerHTML = (hints || []).map(([keys, label]) => `<span>${keys.map(keyHtml).join('')} ${esc(label)}</span>`).join('');
+    hintsEl.innerHTML = (hints || []).map(([keys, label]) => `<span>${keys.map((k) => keyHtml(tr(k))).join('')} ${esc(tr(label))}</span>`).join('');
     if (!modalEl.firstElementChild) focus(keep ?? t.focus);
   }
   onChange();
@@ -158,12 +160,12 @@ export function modal({ title, text, note = '', buttons, danger = true }) {
 }
 
 // --- key labels: the letter on the player's own keyboard -----------------------------
-const NAMES = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Space: 'SPACE', Escape: 'ESC', Enter: 'ENTER', Tab: 'TAB', Backspace: '⌫',
-  ShiftLeft: 'L SHIFT', ShiftRight: 'R SHIFT', ControlLeft: 'L CTRL', ControlRight: 'R CTRL', AltLeft: 'L ALT', AltRight: 'R ALT' };
+const NAMES = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Space: tk('SPACE'), Escape: tk('ESC'), Enter: tk('ENTER'), Tab: tk('TAB'), Backspace: '⌫',
+  ShiftLeft: tk('L SHIFT'), ShiftRight: tk('R SHIFT'), ControlLeft: tk('L CTRL'), ControlRight: tk('R CTRL'), AltLeft: tk('L ALT'), AltRight: tk('R ALT') };
 let layout = null; // Chromium only; elsewhere: the event.key seen when the key was bound, else its QWERTY name
 navigator.keyboard?.getLayoutMap?.().then((m) => { layout = m; onChange(); refresh(); }).catch(() => {});
 export function keyLabel(code) {
-  if (NAMES[code]) return NAMES[code];
+  if (NAMES[code]) return tr(NAMES[code]);
   if (/^Digit\d$/.test(code)) return code[5]; // the digit printed on the key, not AZERTY's unshifted & é " '
   const l = layout?.get(code) ?? store.keyNames[code];
   return (l && l.trim() ? l : code.replace(/^(Key|Digit)/, '').replace(/^Numpad/, 'NUM ')).toUpperCase();
