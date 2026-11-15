@@ -371,13 +371,15 @@ export function krakenSteer(s, ships, rand = Math.random) {
   return { x: tgt.x + Math.cos(tgt.h) * tgt.speed * lead, z: tgt.z + Math.sin(tgt.h) * tgt.speed * lead, t: SLAM.t, r: SLAM.r, dmg: SLAM.dmg };
 }
 // A tentacle rises (telegraph), then comes down: 'slam' once it hits the water, hurting every ship under it.
+// A fort's mortar shell (fireMortar, sl.team 1) lands the same way, sparing the fort's own side and slowing nobody.
 export function stepSlam(sl, dt, ships) {
   if ((sl.t -= dt) > 0) return null;
+  const team = sl.team ?? 3;
   for (const s of ships) {
-    if (!s.alive || s.team === 3 || Math.hypot(s.x - sl.x, s.z - sl.z) > sl.r + s.len * 0.2) continue;
-    s.lastHit = 3; // nobody's kill (PvP)
+    if (!s.alive || allied(s.team, team) || Math.hypot(s.x - sl.x, s.z - sl.z) > sl.r + s.len * 0.2) continue;
+    s.lastHit = team; // 3: nobody's kill (PvP)
     damage(s, sl.dmg);
-    s.slowT = Math.max(s.slowT || 0, 1.5);
+    if (team === 3) s.slowT = Math.max(s.slowT || 0, 1.5);
   }
   return 'slam';
 }
@@ -404,10 +406,20 @@ export function captureReward(p, e, b) {
 // The fort is a square, ship-shaped target (h 0, footprint len × beam·1.2) so stepBall/damage just work.
 // isl (its island): stepBall then hits it anywhere on the island, which would otherwise stop the ball first.
 export function makeFort(x, z, half, isl) {
-  return { type: 'fort', team: 1, x, z, h: 0, isl, len: half * 2, beam: (half * 2) / 1.2, hp: 300, maxHp: 300, alive: true, gold: 120, calm: 0, armorT: 0, slowT: 0, burnT: 0, backAt: 0 };
+  return { type: 'fort', team: 1, x, z, h: 0, isl, len: half * 2, beam: (half * 2) / 1.2, hp: 300, maxHp: 300, alive: true, gold: 120, calm: 0, armorT: 0, slowT: 0, burnT: 0, backAt: 0, mortar: 4 };
 }
 export function makeTurret(x, y, z) {
   return { x, y, z, reload: 2 + Math.random() * 2, reloadTime: 4.5, range: 46, team: 1, aim: 0 };
+}
+
+// The mortar outranges the turrets: a red circle on the water where the ship will be if she holds her course, then the shell.
+// Same shape as a kraken slam (stepSlam lands it). Tuned like SLAM: a hard turn 0.3 s in clears it in every player ship (check.mjs).
+export const MORTAR = { t: 2.5, r: 3.5, dmg: 16, reload: 8, range: 62 };
+export function fireMortar(f, tgt, dt) {
+  f.mortar = Math.max(0, f.mortar - dt);
+  if (f.mortar > 0 || !tgt?.alive || Math.hypot(tgt.x - f.x, tgt.z - f.z) > MORTAR.range) return null;
+  f.mortar = MORTAR.reload;
+  return { x: tgt.x + Math.cos(tgt.h) * tgt.speed * MORTAR.t, z: tgt.z + Math.sin(tgt.h) * tgt.speed * MORTAR.t, t: MORTAR.t, r: MORTAR.r, dmg: MORTAR.dmg, team: f.team };
 }
 
 // Leads the target and solves vy so the ball comes down at hull height.

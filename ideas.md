@@ -12,7 +12,7 @@ Backlog d'idées pour la suite. Coût : **S** = quelques heures, **M** = une dem
 | Idée | Ce que ça apporte | Coût |
 |---|---|---|
 | **Dégâts localisés** | Voiles touchées = plus lent, canons touchés = recharge plus lente, coque = points de vie. Les boulets ramés visent les voiles. | M |
-| **Tirs télégraphiés** | Le fort et les gros navires tirent au mortier : un cercle rouge apparaît sur l'eau, puis l'impact. On les esquive en manœuvrant. | S |
+| **Tirs télégraphiés pour les gros navires** | Les gros navires tirent au mortier, comme le fort (`fireMortar`, déjà fait) : un cercle rouge apparaît sur l'eau, puis l'impact. On les esquive en manœuvrant. | S |
 
 ## Fantasme pirate
 
@@ -754,4 +754,4 @@ Coût : compteur de boosters, sources et premières fois **S**. Tout le reste es
 
 ## Déjà fait
 
-Trois bateaux au choix, vagues progressives, réparation entre les vagues et hors combat, effets sonores, barre de compétences (4 emplacements, apprentissage et niveaux), fort destructible, or ramassable avec aimant, navires marchands avec progression, abordage (auto sous 20 % de coque, sinon QTE barre de timing à Espace, jeu en pause) et équipage (pertes sous le feu, recharge plus lente en sous-effectif, recrues entre les vagues et prisonniers), pause (Échap), combos (multiplicateur d'or ×2 à ×5 si les navires coulent à moins de 6 s d'intervalle) et classement local (top 10, initiales, trié par vague puis or), musique procédurale (boucle en ré mineur, tambour pendant les combats), un sabord par canon (mis à jour avec l'amélioration) et des îles qui arrêtent les boulets. Kraken dans tous les modes : créature lente qui frappe tout bateau proche, joueur ou non (tentacule télégraphiée, à esquiver), tuable, sans butin. Bordée à bout portant : ×1,5 de dégâts à portée d'abordage, pour tous les navires.
+Trois bateaux au choix, vagues progressives, réparation entre les vagues et hors combat, effets sonores, barre de compétences (4 emplacements, apprentissage et niveaux), fort destructible, or ramassable avec aimant, navires marchands avec progression, abordage (auto sous 20 % de coque, sinon QTE barre de timing à Espace, jeu en pause) et équipage (pertes sous le feu, recharge plus lente en sous-effectif, recrues entre les vagues et prisonniers), pause (Échap), combos (multiplicateur d'or ×2 à ×5 si les navires coulent à moins de 6 s d'intervalle) et classement local (top 10, initiales, trié par vague puis or), musique procédurale (boucle en ré mineur, tambour pendant les combats), un sabord par canon (mis à jour avec l'amélioration) et des îles qui arrêtent les boulets. Kraken dans tous les modes : créature lente qui frappe tout bateau proche, joueur ou non (tentacule télégraphiée, à esquiver), tuable, sans butin. Bordée à bout portant : ×1,5 de dégâts à portée d'abordage, pour tous les navires. Mortier du fort : un cercle rouge sur l'eau, l'obus tombe 2,5 s plus tard, un virage serré l'esquive.

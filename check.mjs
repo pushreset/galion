@@ -1,6 +1,6 @@
 // node check.mjs — asserts on the pure sim, and on what the menus store.
 import assert from 'node:assert/strict';
-import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, waveSpec, UPGRADES, SKILLS, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul } from './sim.js';
+import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, fireMortar, MORTAR, waveSpec, UPGRADES, SKILLS, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul } from './sim.js';
 
 WIND.k = 0; // the checks below are written for still air; the wind block turns it back on
 
@@ -105,6 +105,30 @@ for (const h of [0, 1, -2.3]) {
     stepShip(s, 1 / 60);
     tgt.h += 0.004; tgt.speed = 4; stepShip(tgt, 1 / 60);
     for (const I of ISLANDS) assert.ok(Math.hypot(s.x - I.x, s.z - I.z) > I.r * 0.85, 'AI inside island');
+  }
+}
+
+// fort mortar: reloads, has a range, spares the navy, and is dodged by a hard turn but not by holding course
+{
+  const f = makeFort(0, 0, 5, null), far = makeShip('sloop', 0, MORTAR.range + 5, 0, 0);
+  assert.equal(fireMortar(f, far, 10), null, 'no mortar out of range');
+  const pir = makeShip('sloop', 0, 30, 0, 0), navy = makeShip('sloop', 1, 30, 1, 0);
+  const sl = fireMortar(f, pir, 0);
+  assert.ok(sl && sl.x === 30, 'mortar did not fire');
+  assert.equal(fireMortar(f, pir, MORTAR.reload - 0.1), null, 'mortar reload not enforced');
+  while (!stepSlam(sl, 1 / 60, [pir, navy])) {}
+  assert.ok(pir.hp === pir.maxHp - MORTAR.dmg && pir.lastHit === 1 && !pir.slowT, 'mortar should hit the pirate, without slowing her');
+  assert.equal(navy.hp, navy.maxHp, 'mortar should spare the navy');
+  for (const i of [0, 1, 2]) for (const turn of [0, 1]) {
+    const p = makePlayer(i, 30, 0, 0);
+    p.sail = 3; p.speed = p.maxSpeed;
+    const sh = fireMortar(makeFort(0, 0, 5, null), p, 10);
+    while (sh.t > 0) {
+      if (sh.t <= MORTAR.t - 0.3) p.turnIn = turn;
+      stepShip(p, 1 / 60);
+      stepSlam(sh, 1 / 60, [p]);
+    }
+    assert.equal(p.hp < p.maxHp, !turn, `${PLAYER_SHIPS[i].name} ${turn ? 'turning hard should dodge the mortar' : 'holding course should be hit by the mortar'}`);
   }
 }
 

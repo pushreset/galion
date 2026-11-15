@@ -16,7 +16,7 @@ function ear(x, z) {
   return [Math.max(0, 1 - Math.hypot(dx, dz) / 110), (dx - dz) / Math.SQRT2 / 50];
 }
 import { createRadar } from './radar.js';
-import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, waveSpec, fortActive, rollUpgrades, applyUpgrade, UPGRADES, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, SLAM, WIND } from './sim.js';
+import { makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, aiSteer, makeTurret, fireTurret, fireMortar, MORTAR, waveSpec, fortActive, rollUpgrades, applyUpgrade, UPGRADES, ISLANDS, BOUNDS, MAP, setMap, convoySpec, guardSteer, PLAYER_SHIPS, makePlayer, regenShip, SKILLS, skillCd, useSkill, stepKeg, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, SLAM, WIND } from './sim.js';
 
 const VIEW_H = 40; // world units visible vertically
 const TARGET_PX_H = 300; // internal render height ≈ this; integer upscale to the screen
@@ -744,6 +744,10 @@ function updateEnemies(dt) {
   }
   for (const s of ships) if (s.type === 'kraken' && !s.escaped) { const sl = krakenSteer(s, ships); if (sl) addSlam(sl); }
   if (!fortsOn() || state.mode === 'dead') return;
+  for (const f of forts) {
+    const sl = f.alive && fireMortar(f, nearestPlayer(f), dt);
+    if (sl) addSlam(sl);
+  }
   for (const t of forts.flatMap((f) => (f.alive ? f.turrets : []))) {
     const b = fireTurret(t, nearestPlayer(t), dt);
     t.mesh.rotation.y = -t.aim;
@@ -797,8 +801,7 @@ function spawnKraken() {
 }
 function diveKraken() {
   for (const o of ships) if (o.type === 'kraken' && o.alive) { o.escaped = true; fx.splash(o.x, o.z); } // removed like a merchant that got away
-  for (const sl of slams) scene.remove(sl.mesh); // and its arms in the air go with it
-  slams.length = 0;
+  for (let i = slams.length - 1; i >= 0; i--) if (!slams[i].team) { scene.remove(slams[i].mesh); slams.splice(i, 1); } // and its arms in the air go with it (a mortar shell still lands)
 }
 function krakenSlain(k) {
   for (let i = 0; i < 4; i++) fx.splash(k.x + Math.random() * 8 - 4, k.z + Math.random() * 8 - 4);
@@ -807,13 +810,33 @@ function krakenSlain(k) {
 }
 const slams = [];
 function slamMesh() { const m = buildTentacle(); m.rotation.y = Math.random() * 6.28; scene.add(m); return m; }
+// a fort's mortar shell (sim.js fireMortar): a red circle on the water that fills as the shell comes, and the shell itself
+const mortarMat = new THREE.MeshBasicMaterial({ color: '#d8262b', transparent: true, opacity: 0.75, depthWrite: false });
+const mortarGeo = [new THREE.RingGeometry(MORTAR.r - 0.35, MORTAR.r, 24), new THREE.CircleGeometry(MORTAR.r, 24)].map((g) => g.rotateX(-Math.PI / 2));
+const shellGeo = new THREE.SphereGeometry(0.45, 6, 5), shellMat = new THREE.MeshBasicMaterial({ color: '#1c1a1f' });
+function mortarMesh() {
+  const g = new THREE.Group(), [ring, fill, shell] = [new THREE.Mesh(mortarGeo[0], mortarMat), new THREE.Mesh(mortarGeo[1], mortarMat), new THREE.Mesh(shellGeo, shellMat)];
+  ring.position.y = 0.3; fill.position.y = 0.25;
+  g.add(ring, fill, shell);
+  Object.assign(g.userData, { fill, shell });
+  scene.add(g);
+  return g;
+}
 function addSlam(sl) {
-  Object.assign(sl, { id: nextId++, mesh: slamMesh() });
+  Object.assign(sl, { id: nextId++, mesh: sl.team ? mortarMesh() : slamMesh() });
   slams.push(sl);
-  sound('splash', sl.x, sl.z, 0.6);
+  if (sl.team) sound('boom', sl.x, sl.z, 0.5); else sound('splash', sl.x, sl.z, 0.6);
 }
 // telegraph: a ring of bubbles the size of the hit, the arm rises out of it, then whips down over the last quarter
 function drawSlam(sl) {
+  if (sl.team) {
+    const k = Math.max(0, sl.t) / MORTAR.t, { fill, shell } = sl.mesh.userData;
+    const f = (sl.from ??= forts.reduce((a, b) => (Math.hypot(b.x - sl.x, b.z - sl.z) < Math.hypot(a.x - sl.x, a.z - sl.z) ? b : a))); // the nearest fort fired it (guests are not told which)
+    sl.mesh.position.set(sl.x, 0, sl.z);
+    fill.scale.setScalar(1 - k + 0.01);
+    shell.position.set((f.x - sl.x) * k, 7 * k + 110 * k * (1 - k), (f.z - sl.z) * k); // a high arc from the fort
+    return;
+  }
   const k = Math.max(0, sl.t) / SLAM.t; // 1 → 0
   const arm = sl.mesh.userData.arm;
   sl.mesh.position.set(sl.x, -0.3, sl.z);
@@ -1241,7 +1264,7 @@ function snap() {
     b: flying.map((b) => [b.id, b.x, b.y, b.z]),
     l: loot.map((o) => [o.id, o.x, o.z, o.life]),
     k: kegs.map((k) => [k.id, k.x, k.z]),
-    j: slams.map((o) => [o.id, o.x, o.z, o.t]),
+    j: slams.map((o) => [o.id, o.x, o.z, o.t, o.team || 0]),
     f: forts.map((f) => [f.hp, f.alive, f.turrets.map((t) => t.aim)]),
     g: { mode: state.mode, wave: state.wave, gold: state.gold, delivered: state.delivered, t: state.t, left: state.left, banner: state.banner > 0 ? state.bannerText : '', bt: state.banner, combo: [combo.n, combo.t], wind: WIND.a },
     e: events.splice(0),
@@ -1264,7 +1287,7 @@ function syncList(list, map, rows, keys, make) {
   for (const [id, ...v] of rows) {
     let o = map.get(id);
     const fresh = !o;
-    if (fresh) { o = Object.assign(make(), { id }); map.set(id, o); list.push(o); }
+    if (fresh) { o = Object.assign(make(v), { id }); map.set(id, o); list.push(o); }
     track(o, keys, v.slice(0, keys.length), fresh);
     if (fresh) mix(o, keys, 1);
     seen.add(o);
@@ -1325,7 +1348,7 @@ function applySnap(m) {
   syncList(flying, ballById, m.b, BK, () => ({}));
   syncList(loot, lootById, m.l, LK, () => ({ mesh: barrelMesh(), seed: Math.random() * 6 }));
   syncList(kegs, kegById, m.k, KK, () => ({ mesh: kegMesh() }));
-  syncList(slams, slamById, m.j || [], JK, () => ({ mesh: slamMesh(), r: SLAM.r }));
+  syncList(slams, slamById, m.j || [], JK, (v) => (v[3] ? { mesh: mortarMesh(), r: MORTAR.r, team: v[3] } : { mesh: slamMesh(), r: SLAM.r }));
   (m.f || []).forEach(([hp, alive, aims], i) => {
     const fort = forts[i];
     if (!fort) return;

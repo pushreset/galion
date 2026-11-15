@@ -91,6 +91,7 @@ These are the defaults; every one can be changed in **SETTINGS › CONTROLS**. K
 ## Features
 
 - Three player ships, progressive waves, destructible fort, islands that block cannonballs
+- The fort's mortar: it outranges the fort's cannons. A red circle appears on the water where you will be if you hold your course, and the shell lands 2.5 s later: turn hard to dodge it
 - The kraken: a slow sea monster that roams the map in every mode (waves 4, 7, 10…, convoys 3, 6, 9…, PvP a minute in and a minute after each kill). It slams any ship that comes near, pirate, navy or merchant alike: a tentacle rises, then falls where you were heading 2.2 s later, so turn hard. It can be killed, but drops no loot, and neither do the ships it sinks; in PvP its sinkings score for nobody
 - Skill bar (4 slots, learn and level up between waves)
 - Merchant convoys, gold pickup with magnet, combo multiplier (×2 to ×5)
