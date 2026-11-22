@@ -55,6 +55,7 @@ export const FR = {
   '+10% speed': '+10 % vitesse', '+15% range': '+15 % portée', '+25% shot damage': '+25 % dégâts des tirs',
   'Recruit: +8 crew': 'Recrues : +8 équipage', 'Carpenters: faster repair out of combat': 'Charpentiers : réparation plus rapide hors combat',
   'Learn {0}: {1}': 'Apprendre {0} : {1}', '{0} {1}: stronger, faster cooldown': '{0} {1} : plus fort, recharge plus rapide',
+  'Refit your ship: tap a card': 'Améliore ton navire : touche une carte',
   'Refit your ship: click or press {0}, {1} or {2}': 'Améliore ton navire : clique ou appuie sur {0}, {1} ou {2}',
   'locked': 'verrouillé',
   // end of a run
@@ -120,7 +121,7 @@ export const FR = {
   'CONNECTION FAILED': 'CONNEXION ÉCHOUÉE', 'THE ROOM CAN NOT BE REACHED.': 'LE SALON EST INJOIGNABLE.', 'RETRY': 'RÉESSAYER',
   'WAITING FOR THE HOST…': 'EN ATTENTE DE L\'HÔTE…',
   // HUD
-  'SAIL': 'VOILES', 'PORT': 'BÂBORD', 'STAR': 'TRIBORD', 'NAVY GOLD': 'OR DE LA MARINE', 'COMBO': 'COMBO', 'DEFENDERS': 'DÉFENSEURS', 'KN': 'ND',
+  'TURN YOUR SCREEN SIDEWAYS': 'TOURNE TON ÉCRAN', 'SAIL': 'VOILES', 'PORT': 'BÂBORD', 'STAR': 'TRIBORD', 'NAVY GOLD': 'OR DE LA MARINE', 'COMBO': 'COMBO', 'DEFENDERS': 'DÉFENSEURS', 'KN': 'ND',
   'when the cursor is on the gold mark': 'quand le curseur est sur la marque dorée',
   'sail up/down': 'voiles', 'turn': 'virer', 'fire left': 'bâbord', 'fire right': 'tribord', 'skills': 'compétences', 'board': 'aborder',
   'sound': 'son', 'zoom': 'zoom', 'pause': 'pause',

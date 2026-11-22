@@ -168,6 +168,14 @@
   padding: 4px 10px; background: var(--bs-wood); border: 2px solid var(--bs-wood-edge); box-shadow: inset 0 0 0 2px var(--bs-trim); }
 .bs-hints:empty { display: none; }
 .bs-hints > span { display: flex; gap: 4px; align-items: center; }
+.bs-hints [data-back] { pointer-events: auto; cursor: pointer; }
+/* touch screen: the bar is the BACK button and nothing else */
+@media (pointer: coarse) {
+  .bs-hints { padding: 10px 16px; }
+  .bs-hints:not(:has([data-back])), .bs-hints > span:not([data-back]), .bs-hints .bs-key { display: none; }
+  #ui-stage:has(#ui-screen [data-f="back"]) .bs-hints { display: none; } /* the screen has its own BACK button */
+  .bs-hints [data-back]::before { content: '◀'; }
+}
 
 /* messages. Icons: ◌ wait, ✓ ok, ! warn, ✕ error */
 .bs-toast { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px;

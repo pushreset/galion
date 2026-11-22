@@ -8,9 +8,11 @@ const $ = (id) => document.getElementById(id);
 const stage = $('ui-stage'), host = $('ui-screen'), veil = $('ui-veil'), hintsEl = $('ui-hints'), modalEl = $('ui-modal'), toastsEl = $('ui-toasts');
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-// Silkscreen is only sharp on whole device pixels: ×1, ×2… on a plain screen, ×1.5 too on a Retina one
+// Silkscreen is only sharp on whole device pixels: ×1, ×2… on a plain screen, ×1.5 too on a Retina one.
+// A touch screen fills the window instead: targets a finger can hit matter more than sharp letters.
 function fit() {
-  const d = devicePixelRatio || 1, s = Math.max(1, Math.floor(Math.min(innerWidth / W, innerHeight / H) * d)) / d;
+  const d = devicePixelRatio || 1, raw = Math.min(innerWidth / W, innerHeight / H);
+  const s = matchMedia('(pointer: coarse)').matches ? raw : Math.max(1, Math.floor(raw * d)) / d;
   const snap = (v) => Math.round(v * d) / d;
   stage.style.transform = `translate(${snap((innerWidth - W * s) / 2)}px, ${snap((innerHeight - H * s) / 2)}px) scale(${s})`;
 }
@@ -53,7 +55,7 @@ function mount(fresh, keep) {
     t.h = def.render(el, t.props) || {};
     if (def.veil) veil.style.background = `rgba(12, 33, 64, ${def.veil})`;
     const hints = typeof def.hints === 'function' ? def.hints(t.props) : def.hints;
-    hintsEl.innerHTML = (hints || []).map(([keys, label]) => `<span>${keys.map((k) => keyHtml(tr(k))).join('')} ${esc(tr(label))}</span>`).join('');
+    hintsEl.innerHTML = (hints || []).map(([keys, label]) => `<span${keys.includes('ESC') ? ' data-back' : ''}>${keys.map((k) => keyHtml(tr(k))).join('')} ${esc(tr(label))}</span>`).join('');
     if (!modalEl.firstElementChild) focus(keep ?? t.focus);
   }
   onChange();
@@ -108,6 +110,8 @@ stage.addEventListener('click', (e) => {
   if (!el || el.disabled || !layer().contains(el)) return;
   (modalEl.firstElementChild ? modalActs : stack.at(-1)?.h.acts)?.[el.dataset.f]?.(el, e);
 });
+// the Escape hint is a button too: the way back on a screen without a keyboard
+hintsEl.addEventListener('click', (e) => { if (e.target.closest('[data-back]')) modalEl.firstElementChild ? modalActs.cancel?.() : back(); });
 // The one keydown of the menus (game.js routes it here while a screen is open). Returns nothing; handled keys are kept from the browser.
 export function key(e) {
   const t = stack.at(-1), a = focused(), typing = a?.tagName === 'INPUT';

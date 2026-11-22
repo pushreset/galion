@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Broadside</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#0c2140">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <!-- the title screen's skull (screens.js SKULL) on the page's sea, one unit per pixel at 16 px -->
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'><path fill='%230c2140' d='M0 0h16v16h-16z'/><path fill='%23f5ecd2' transform='translate(2 4)' d='M3 0h6v1h-6z M2 1h8v1h-8z M1 2h10v1h-10z M1 3h1v2h-1z M4 3h4v2h-4z M10 3h1v2h-1z M1 5h10v1h-10z M2 6h3v1h-3z M7 6h3v1h-3z M3 7h6v1h-6z M3 8h1v1h-1z M5 8h2v1h-2z M8 8h1v1h-1z'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -77,6 +82,27 @@
   .ebar.p i { background: #94c54c; } .ebar.e i { background: #ff7a2a; }
   .ebar.self { background: none; border-color: transparent; } .ebar.self i { display: none; }
   .ebar.p::before, .ebar.e::before, .ebar.self::before { content: attr(data-tag); position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); font-size: 10px; color: #f5ecd2; }
+  /* touch screen: one button per action (game.js press), the key labels go, the rose leaves the right thumb's corner */
+  #touch, #rotate { display: none; }
+  @media (pointer: coarse) {
+    body { touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    #c, #touch, #skills { touch-action: none; }
+    #touch { display: block; inset: 0; }
+    body.menus #touch, body.selecting #touch, #help, #stats kbd, .slot kbd, .card kbd { display: none; }
+    #touch button { position: absolute; width: 72px; height: 72px; padding: 0; pointer-events: auto; font: inherit; font-size: 24px; color: #f5ecd2; text-shadow: inherit; background: rgba(63, 38, 22, 0.85); border: 3px solid #1b110b; box-shadow: inset 0 0 0 3px #8d5c35; }
+    #touch button:active { box-shadow: inset 0 0 0 3px #ffd24a; }
+    #touch button[hidden] { display: none; }
+    #t-up { left: 96px; bottom: 168px; } #t-down { left: 96px; bottom: 24px; } #t-left { left: 24px; bottom: 96px; } #t-right { left: 168px; bottom: 96px; }
+    #touch .fire { width: 96px; font-size: 12px; bottom: 48px; } #t-port { right: 128px; } #t-star { right: 24px; }
+    #touch #t-board { right: 24px; bottom: 132px; width: 200px; height: 56px; font-size: 14px; color: #ffd24a; }
+    #touch .small { width: 48px; height: 48px; top: 16px; font-size: 16px; } #t-pause { left: 300px; } #t-zoom { left: 356px; }
+    #skills { right: auto; left: 50%; bottom: 34px; transform: translateX(-50%); pointer-events: auto; }
+    #radar-box { bottom: auto; top: 150px; } #radar { width: 168px; height: 168px; }
+    #banner { font-size: 20px; } /* the longest one stays clear of the rose on a 1024 px screen */
+  }
+  @media (pointer: coarse) and (orientation: portrait) {
+    #rotate { display: grid; place-items: center; inset: 0; z-index: 20; background: #0c2140; font-size: 20px; text-align: center; }
+  }
 </style>
 <script defer src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js" integrity="sha384-nlUQ8ZqCbvStErob+biJNzSgltf6urV3VGqhfIfzhmg9RXmpeRm76ELw0pYnKlTR" crossorigin="anonymous"></script>
 <script type="importmap">
@@ -110,6 +136,14 @@
 </div>
 <div id="cards" class="hud panel" hidden><h2 id="cards-h"></h2><div id="cards-list"></div></div>
 <div id="help" class="hud panel"></div>
+<div id="touch" class="hud">
+  <button id="t-up" data-a="sailUp">▲</button><button id="t-down" data-a="sailDown">▼</button>
+  <button id="t-left" data-a="turnLeft">◀</button><button id="t-right" data-a="turnRight">▶</button>
+  <button id="t-port" class="fire" data-a="firePort" data-t="PORT">PORT</button><button id="t-star" class="fire" data-a="fireStarboard" data-t="STAR">STAR</button>
+  <button id="t-board" data-a="board" data-t="BOARD" hidden>BOARD</button>
+  <button id="t-pause" class="small" data-a="pause">II</button><button id="t-zoom" class="small" data-a="overview">⤢</button>
+</div>
+<div id="rotate" class="hud" data-t="TURN YOUR SCREEN SIDEWAYS">TURN YOUR SCREEN SIDEWAYS</div>
 <script type="module" src="game.js"></script>
 </body>
 </html>

@@ -190,6 +190,7 @@ const state = { mode: 'select', wave: 0, gold: 0, t: 0, banner: 0, bannerText: '
 // input: every game key is an action looked up by physical key code (store.js DEFAULT_KEYS, changed in the settings screen),
 // so fire is A/E on AZERTY and Q/E on QWERTY. `held`: the actions whose key is down.
 const held = new Set();
+const coarse = matchMedia('(pointer: coarse)').matches; // a touch screen: on-screen buttons (index.html #touch), so no key is named
 let keys = {}, actionOf = {};
 function rekey() {
   keys = store.keys;
@@ -203,8 +204,8 @@ function rekey() {
   $('help').hidden = !store.display.hints;
   $('k-port').textContent = ui.keyLabel(keys.firePort);
   $('k-star').textContent = ui.keyLabel(keys.fireStarboard);
-  $('k-board').textContent = ui.keyLabel(keys.board);
-  $('cards-h').textContent = t('Refit your ship: click or press {0}, {1} or {2}', ui.keyLabel(keys.skill1), ui.keyLabel(keys.skill2), ui.keyLabel(keys.skill3));
+  $('k-board').textContent = coarse ? t('BOARD') : ui.keyLabel(keys.board); // touch: the button's name
+  $('cards-h').textContent = coarse ? t('Refit your ship: tap a card') : t('Refit your ship: click or press {0}, {1} or {2}', ui.keyLabel(keys.skill1), ui.keyLabel(keys.skill2), ui.keyLabel(keys.skill3));
   // the HUD's fixed labels (index.html data-t: the English text), in the player's language
   document.documentElement.lang = lang;
   for (const el of document.querySelectorAll('[data-t]')) el.textContent = t(el.dataset.t);
@@ -221,7 +222,8 @@ function toggleMute() {
   setAudio(a);
   if (ui.top() === 'settings') ui.refresh();
 }
-addEventListener('pointerdown', () => paused || unlock()); // a reload skips the title: the first click or key of the page unlocks the audio
+// a reload skips the title: the first click, tap or key of the page unlocks the audio (a finger only counts once lifted: pointerup)
+for (const ev of ['pointerdown', 'pointerup']) addEventListener(ev, () => paused || unlock());
 addEventListener('keydown', (e) => {
   if (!paused) unlock(); // paused: the audio clock stays stopped
   if (ui.active()) { // a menu screen is open: every key is its own (a text field keeps its characters)
@@ -234,7 +236,13 @@ addEventListener('keydown', (e) => {
   const a = actionFor(e);
   if (a || /^(Arrow\w+|Space|Enter|Backspace)$/.test(e.code)) e.preventDefault();
   if (e.repeat) return;
-  if (a === 'pause' || e.code === 'Escape') return openPause(); // Escape too, though fullscreen spends it on leaving fullscreen
+  if (e.code === 'Escape') return openPause(); // Escape too, though fullscreen spends it on leaving fullscreen
+  press(a);
+});
+// One action pressed, by a key or by a finger (index.html #touch, a skill slot, a refit card)
+function press(a) {
+  if (ui.active()) return; // a menu screen is open: nothing reaches the ship
+  if (a === 'pause') return openPause();
   if (state.boarding) { if (a === 'board') boardPress(); return; } // the world is stopped: boarding is the only input
   if (a === 'overview') overview = !overview;
   if (a === 'mute') toggleMute();
@@ -250,7 +258,7 @@ addEventListener('keydown', (e) => {
   // a guest hears its own clicks right away, not a round trip later
   if (msg.t === 'card' && me.cards[pick]) { banner(cardText(me, me.cards[pick].id).toUpperCase(), 1.6); sfx.coin(); }
   if (msg.t === 'skill') { const k = me?.alive && me.skills[pick]; if (k && !(me.cd[k.id] > 0)) sfx.hit(0.5, 0); }
-});
+}
 // One player's action (local keys, or a guest's message on the host). Guest input is untrusted: clamp it.
 function act(p, m) {
   if (m.t === 'in') p.input = { turn: Math.max(-1, Math.min(1, +m.turn || 0)), fireL: !!m.fireL, fireR: !!m.fireR };
@@ -510,11 +518,18 @@ const shipStats = (s) => [
   ['SPEED', s.maxSpeed / 14], ['HANDLING', s.turn / 1.4], ['HULL', s.maxHp / 150],
   ['GUNS', s.cannons / 6], ['RELOAD', 2.4 / s.reloadTime], ['CREW', s.maxCrew / 50],
 ];
-// mouse: a click on a refit card presses its key
-// ponytail: replays the key handler so the pause / guest rules stay in one place
+// Fingers: a #touch button is its action's key, a skill slot its skill's key. A touch stays with the button it landed on
+// (implicit pointer capture), so one thumb can hold the helm while the other fires.
+const fingerAction = (e) => { const s = e.target.closest('.slot'); return s ? 'skill' + ([...s.parentNode.children].indexOf(s) + 1) : e.target.closest('[data-a]')?.dataset.a; };
+for (const el of [$('touch'), $('skills')]) {
+  el.addEventListener('pointerdown', (e) => { const a = fingerAction(e); if (a) { e.preventDefault(); press(a); } });
+  for (const ev of ['pointerup', 'pointercancel']) el.addEventListener(ev, (e) => held.delete(fingerAction(e)));
+  el.addEventListener('contextmenu', (e) => e.preventDefault()); // a long press is a held button, not a menu
+}
+// mouse or finger: a click on a refit card presses its key
 $('cards-list').addEventListener('click', (e) => {
   const c = e.target.closest('.card');
-  if (c) dispatchEvent(new KeyboardEvent('keydown', { code: keys['skill' + ([...c.parentNode.children].indexOf(c) + 1)] }));
+  if (c) press('skill' + ([...c.parentNode.children].indexOf(c) + 1));
 });
 function makePirate(s, pid, pick, name) {
   return Object.assign(s, { isPlayer: true, pid, pick, tag: nick(name) || 'P' + (pid + 1), team: mode === 'pvp' ? 10 + pid : 0, input: { turn: 0, fireL: false, fireR: false }, cards: [], kills: 0 });
@@ -1129,9 +1144,10 @@ function hud() {
   // "Space: board" tag over the nearest ship close enough to grapple
   const bt = me.alive && !state.boarding && state.mode !== 'pick' ? boardTarget(me) : null;
   $('board-hint').hidden = !bt;
+  $('t-board').hidden = !bt && !state.boarding; // touch: the button to grapple, then to strike
   if (bt) {
     _p.set(bt.x, bt.len * 0.95, bt.z).project(camera);
-    $('board-hint').textContent = `${ui.keyLabel(keys.board)} · ${bt.hp < 0.2 * bt.maxHp ? t('BOARD (AUTO)') : t('BOARD')}`;
+    $('board-hint').textContent = (coarse ? '' : ui.keyLabel(keys.board) + ' · ') + (bt.hp < 0.2 * bt.maxHp ? t('BOARD (AUTO)') : t('BOARD'));
     $('board-hint').style.transform = `translate(${Math.round(((_p.x + 1) / 2) * W)}px, ${Math.round(((1 - _p.y) / 2) * H) - 46}px) translateX(-50%)`;
   }
   // refit cards: each pirate picks their own
