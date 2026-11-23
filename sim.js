@@ -101,7 +101,7 @@ export function stepShip(s, dt) {
   for (const k of ['slowT', 'armorT', 'boostT', 'smokeT']) s[k] = Math.max(0, s[k] - dt);
   for (const id in s.cd) s.cd[id] = Math.max(0, s.cd[id] - dt);
   s.boardCd = Math.max(0, s.boardCd - dt);
-  if (s.burnT > 0) { s.burnT = Math.max(0, s.burnT - dt); damage(s, BURN_DPS * dt); }
+  if (s.burnT > 0) { s.burnT = Math.max(0, s.burnT - dt); damage(s, BURN_DPS * dt, s.burnBy, 'gun'); } // the burn counts for whoever lit it, as her guns' work
   const slow = s.slowT > 0, boost = s.boostT > 0;
   const target = SAIL_LEVELS[s.sail] * s.maxSpeed * (slow ? 0.45 : 1) * (boost ? 1.7 : s.type === 'kraken' ? 1 : windMul(s.h)); // Full sail (oars out) and the kraken ignore the wind
   const acc = boost ? 5 : target > s.speed ? 1.6 : 2.6; // sails take a while to fill, drag bites faster
@@ -208,7 +208,7 @@ export function stepBall(b, dt, ships) {
       const pb = Math.hypot(b.x - b.x0, b.z - b.z0) < BALL.pb; // a fort's ball carries no origin: NaN, never point-blank
       damage(s, b.dmg * (pb ? BALL.pbMul : 1), b.by, pb ? 'pb' : 'gun');
       if (b.ammo?.id === 'chain') s.slowT = Math.max(s.slowT, 3 * b.ammo.p);
-      if (b.ammo?.id === 'fire') s.burnT = Math.max(s.burnT, 4 * b.ammo.p);
+      if (b.ammo?.id === 'fire') { s.burnT = Math.max(s.burnT, 4 * b.ammo.p); s.burnBy = b.by; }
       return { hit: s, pb };
     }
   }
@@ -223,6 +223,8 @@ export function stepBall(b, dt, ships) {
 }
 
 // Ship-vs-ship: push apart, ram damage from closing speed. Returns rams for FX.
+// heft: a hull's weight in a ram, from its footprint (the kraken, short but wide, outweighs a galleon).
+const heft = (s) => Math.sqrt(s.len * s.beam);
 export function collideShips(ships) {
   const rams = [];
   for (let i = 0; i < ships.length; i++) {
@@ -235,12 +237,14 @@ export function collideShips(ships) {
       const push = (lim - d) / 2, nx = dx / d, nz = dz / d;
       a.x -= nx * push; a.z -= nz * push;
       b.x += nx * push; b.z += nz * push;
-      const closing = (Math.cos(a.h) * a.speed - Math.cos(b.h) * b.speed) * nx + (Math.sin(a.h) * a.speed - Math.sin(b.h) * b.speed) * nz;
+      const va = (Math.cos(a.h) * nx + Math.sin(a.h) * nz) * a.speed, vb = -(Math.cos(b.h) * nx + Math.sin(b.h) * nz) * b.speed; // each hull's own speed into the other
+      const closing = va + vb;
       if (closing > 3 && !allied(a.team, b.team)) { // allies just bump
         a.lastHit = b.team; b.lastHit = a.team;
-        // by size: a galleon (14) running down a sloop (8) deals ×1.75 and takes ×0.57
-        damage(a, (closing * 1.2 * b.len) / a.len, b, 'ram');
-        damage(b, (closing * 1.2 * a.len) / b.len, a, 'ram');
+        // by weight: a galleon running down a sloop deals ×1.68 and takes ×0.59.
+        // The play style credits only a hull that brought a third of the blow: a ship rammed at anchor did not ram.
+        damage(a, (closing * 1.2 * heft(b)) / heft(a), vb * 3 >= closing ? b : null, 'ram');
+        damage(b, (closing * 1.2 * heft(a)) / heft(b), va * 3 >= closing ? a : null, 'ram');
         a.speed *= 0.4; b.speed *= 0.4;
         rams.push({ x: a.x + nx * a.len * 0.3, z: a.z + nz * a.len * 0.3, a, b });
       }

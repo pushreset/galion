@@ -957,9 +957,9 @@ function endRun() {
   const m = convoy ? 'convoy' : 'waves';
   const crew = [...players].sort((a, b) => a.pid - b.pid).map((p) => ({ name: p.tag, ship: String(p.name).toLowerCase() })); // online: the whole crew signs, in seat order
   const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: state.wave, gold: state.gold, combo: combo.best, at: Date.now() };
-  const local = signLocal(board, entry);
-  const res = { entry, board, name: me?.tag || store.name, online: net !== 'solo', dealt: me?.dealt, best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
-  store.style = me?.dealt; // added to this browser's running count (the menu's YOUR STYLE)
+  const local = signLocal(board, entry), dealt = { ...me?.dealt }; // a copy: a keg still afloat may add to the count after the screen is up
+  const res = { entry, board, name: me?.tag || store.name, online: net !== 'solo', dealt, best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
+  store.style = dealt; // added to this browser's running count (the menu's YOUR STYLE)
   held.clear();
   ui.open('gameover', res);
   if (local.rank === 0) sfx.fanfare();
@@ -1271,13 +1271,13 @@ function skillHud() {
 // --- online: host snapshots, guest rendering, lobby -----------------------------
 // Ships go as arrays in SF order (compact); pirates add a PF object with what the HUD needs.
 const SF = ['id', 'type', 'livery', 'team', 'x', 'z', 'h', 'speed', 'turnRate', 'sail', 'hp', 'maxHp', 'alive', 'sinkT', 'burnT', 'smokeT', 'cannons', 'escaped', 'pid', 'merchant'];
-const PF = ['pid', 'tag', 'name', 'reload', 'reloadTime', 'crew', 'maxCrew', 'skills', 'cd', 'ammo', 'boardCd', 'cards', 'kills', 'fix', 'dealt'];
+const PF = ['pid', 'tag', 'name', 'reload', 'reloadTime', 'crew', 'maxCrew', 'skills', 'cd', 'ammo', 'boardCd', 'cards', 'kills', 'fix'];
 const SNAP_DT = 0.05; // 20 Hz
 let snapT = 0;
 function snap() {
   return {
     s: ships.map((o) => SF.map((k) => o[k] ?? null)),
-    p: players.map((o) => Object.fromEntries(PF.map((k) => [k, o[k]]))),
+    p: players.map((o) => ({ ...Object.fromEntries(PF.map((k) => [k, o[k]])), ...(state.mode === 'dead' && { dealt: o.dealt }) })), // dealt: only the end screen reads it, so it goes once all are sunk
     b: flying.map((b) => [b.id, b.x, b.y, b.z]),
     l: loot.map((o) => [o.id, o.x, o.z, o.life]),
     k: kegs.map((k) => [k.id, k.x, k.z]),

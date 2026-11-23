@@ -16,8 +16,10 @@ const STYLE = { gun: [tk('GUNNER'), tk('GUNS')], pb: [tk('HOTHEAD'), tk('POINT B
 function styleLine(dealt, label) {
   const s = styleOf(dealt);
   if (!s) return '';
-  const parts = Object.entries(s.share).map(([k, v]) => [k, Math.round(v * 100)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-  return `<span class="bs-dim" style="letter-spacing:1px">${label} · <span class="bs-gold">${t(STYLE[s.id][0])}</span></span><span class="bs-dim">${parts.map(([k, v]) => `${t(STYLE[k][1])} ${v}%`).join(' · ')}</span>`;
+  const parts = Object.entries(s.share).map(([k, v]) => [k, Math.floor(v * 100), (v * 100) % 1]);
+  let left = 100 - parts.reduce((a, p) => a + p[1], 0); // rounded so the parts add up to 100: the points left go to the biggest remainders
+  for (const p of [...parts].sort((a, b) => b[2] - a[2])) if (left-- > 0) p[1]++;
+  return `<span class="bs-dim" style="letter-spacing:1px">${label} · <span class="bs-gold">${t(STYLE[s.id][0])}</span></span><span class="bs-dim">${parts.filter((p) => p[1] > 0).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${t(STYLE[k][1])} ${v}%`).join(' · ')}</span>`;
 }
 const num = (n) => (+n).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US');
 

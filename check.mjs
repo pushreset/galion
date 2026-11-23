@@ -97,7 +97,7 @@ for (const h of [0, 1, -2.3]) {
 // play style: a pirate's damage is counted by source (the navy's is not), styleOf names the run
 {
   const p = makePlayer(0, 0, 0, 0), far = makeShip('galleon', 1, 0, 20, 0), near = makeShip('galleon', 1, 0, 5, 0);
-  const shoot = (tgt) => { p.reload.star = 0; for (const b of fireBroadside(p, 1, r0)) for (let i = 0; i < 600; i++) if (stepBall(b, 1 / 120, [tgt])) break; };
+  const shoot = (tgt, s = p) => { s.reload.star = 0; for (const b of fireBroadside(s, 1, r0)) for (let i = 0; i < 600; i++) if (stepBall(b, 1 / 120, [tgt])) break; };
   shoot(far);
   assert.deepEqual(p.dealt, { gun: far.maxHp - far.hp });
   shoot(near);
@@ -111,6 +111,19 @@ for (const h of [0, 1, -2.3]) {
   collideShips([p, navy]);
   assert.ok(Math.abs(p.dealt.ram - (navy.maxHp - navy.hp)) < 1e-9);
   assert.equal(navy.dealt, undefined, 'the navy keeps no count');
+  const still = makePlayer(0, 0, 0, 0), charger = makeShip('brig', 1, 2, 0, Math.PI);
+  charger.speed = 10;
+  collideShips([still, charger]);
+  assert.ok(charger.hp < charger.maxHp && still.dealt.ram === undefined, 'a pirate rammed at anchor did not ram');
+  const kr = makeShip('kraken', 3, 0, 0, 0), lev = makePlayer(2, 2, 0, Math.PI);
+  lev.speed = 8;
+  collideShips([kr, lev]);
+  assert.ok(lev.maxHp - lev.hp > kr.maxHp - kr.hp, 'the kraken outweighs a galleon');
+  const c = makePlayer(1), lit = makeShip('galleon', 1, 0, 20, 0);
+  useSkill(c, 1); shoot(lit, c);
+  const impact = c.dealt.gun;
+  for (let i = 0; i < 60; i++) stepShip(lit, 1 / 60);
+  assert.ok(c.dealt.gun > impact + 2, 'the burn of a fire shot counts for the ship that lit it');
   const last = makeShip('sloop', 1);
   last.hp = 5; damage(last, 1e9, p, 'board');
   assert.equal(p.dealt.board, 5, 'only the hull that was left counts');
@@ -546,6 +559,10 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   mem.set('broadside.scores', JSON.stringify([{ ini: 'AAA', ship: 'Wasp', wave: 5, gold: 10, combo: 1, date: 1 }, { ini: 'AAA', ship: 'Wasp+Corsair', wave: 9, gold: 10, combo: 1, date: 1 }]));
   assert.deepEqual([store.best.waves.length, store.best['waves-crew'].length, store.best.convoy.length], [1, 1, 0]);
   assert.equal(boardOf('convoy', 3), 'convoy-crew');
+  // the play style adds up run after run; a count from a host is clamped
+  store.style = { gun: 10, ram: 1e300, keg: -5, pb: 'x' };
+  store.style = { gun: 5 };
+  assert.deepEqual(store.style, { gun: 15, pb: 0, keg: 0, ram: 1e6, board: 0 });
   const run = (wave, gold) => ({ crew: [{ name: 'ANNE', ship: 'wasp' }], wave, gold, combo: 0, at: 0 });
   assert.equal(signLocal('waves', run(5, 20)).rank, 0, 'same wave: gold decides');
   assert.equal(signLocal('waves', run(4, 999)).rank, 2);

@@ -130,6 +130,10 @@ try {
     await G.click('[data-f=ready]');
     await H.waitForFunction(() => __game.state.wave === 1, null, { timeout: 40000 });
     assert.deepEqual(await H.evaluate(() => __game.players.map((p) => p.name)), ['Corsair', 'Leviathan'], 'both pirates in the convoy run');
+    // sunk together: the guest's end screen names the guest's own style, from the count the host kept and sent
+    await H.evaluate(() => { __game.players[1].dealt = { gun: 100, board: 300 }; for (const p of __game.players) Object.assign(p, { hp: 0, alive: false }); });
+    await G.waitForFunction(() => __game.ui.top() === 'gameover', null, { timeout: 15000 });
+    assert.match(await G.evaluate(() => document.getElementById('ui-screen').textContent), /STYLE · BOARDER\s*BOARDING 75% · GUNS 25%/);
   }
   assert.deepEqual(errors, [], 'page errors');
   console.log('quick match ok');

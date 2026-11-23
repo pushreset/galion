@@ -105,7 +105,7 @@ for (const [w, h, dpr, want] of [[960, 540, 1, 1], [1440, 900, 1, 1], [1920, 108
   await sink(p);
   assert.equal(await top(p), 'gameover');
   await sleep(500);
-  assert.match(await text(p), /SUNK WAVES · SOLO · CORSAIR.*STYLE · SABOTEUR ?KEGS 50% · GUNS 36% · POINT BLANK 11% · RAM 4%.*NEW PERSONAL BEST.*SIGNED AS BLACKBEARDXY.*#1 THIS BROWSER/); // the play style: what the damage was dealt with
+  assert.match(await text(p), /SUNK WAVES · SOLO · CORSAIR.*STYLE · SABOTEUR ?KEGS 50% · GUNS 36% · POINT BLANK 11% · RAM 3%.*NEW PERSONAL BEST.*SIGNED AS BLACKBEARDXY.*#1 THIS BROWSER/); // the play style: what the damage was dealt with
   assert.match(await text(p, '.bs-over-row.is-you'), /1 ?BLACKBEARDXY ?3 ?840 ?×3/);
   assert.match(await text(p, '#ui-toasts'), /WORLD BOARD UNREACHABLE · SAVED ON THIS BROWSER/);
   assert.deepEqual((await ls(p, 'best')).waves.map((r) => [r.crew[0].name, r.crew[0].ship, r.wave, r.gold, r.combo]), [['BLACKBEARDXY', 'corsair', 3, 840, 3]]);

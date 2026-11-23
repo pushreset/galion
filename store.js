@@ -103,5 +103,6 @@ export const store = {
   get best() { return loadBest(); },
   // damage by source over every run on this browser (styleOf reads it); a run is added by assigning its own count
   get style() { return get('style') || {}; },
-  set style(run) { const all = this.style; set('style', Object.fromEntries(STYLES.map((k) => [k, (+all[k] || 0) + (+run?.[k] || 0)]))); },
+  // a guest's count comes from its host: each value is clamped, a bad one must not own the total for good
+  set style(run) { const all = this.style; set('style', Object.fromEntries(STYLES.map((k) => [k, (+all[k] || 0) + Math.min(1e6, Math.max(0, +run?.[k] || 0))]))); },
 };
