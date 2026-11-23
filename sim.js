@@ -74,16 +74,17 @@ export function makeShip(type, team, x = 0, z = 0, h = 0) {
 }
 
 // Player picks one at start. Pirate refits out-reload every navy crew of the same hull.
+// dmgMul: the bigger the hull, the heavier the guns. A full Leviathan broadside (6 × 9 × 1.5 = 81) sinks a navy sloop at once.
 export const PLAYER_SHIPS = [
   { type: 'sloop', name: 'Wasp', blurb: 'Fast and nimble, but fragile', skills: ['boost', 'keg'], learn: ['smoke', 'chain'], stats: { maxSpeed: 13.5, turn: 1.35, hp: 70, cannons: 3, range: 28, reloadTime: 2.4, crew: 24 } },
-  { type: 'brig', name: 'Corsair', blurb: 'A balanced raider', skills: ['chain', 'fire'], learn: ['boost', 'repair'], stats: { maxSpeed: 11, turn: 0.95, hp: 100, cannons: 4, range: 32, reloadTime: 2.9, crew: 34 } },
-  { type: 'galleon', name: 'Leviathan', blurb: 'A slow floating fortress', skills: ['nova', 'brace'], learn: ['fire', 'repair'], stats: { maxSpeed: 8.5, turn: 0.62, hp: 150, cannons: 6, range: 36, reloadTime: 3.6, crew: 50 } },
+  { type: 'brig', name: 'Corsair', blurb: 'A balanced raider', skills: ['chain', 'fire'], learn: ['boost', 'repair'], stats: { dmgMul: 1.2, maxSpeed: 11, turn: 0.95, hp: 100, cannons: 4, range: 32, reloadTime: 2.9, crew: 34 } },
+  { type: 'galleon', name: 'Leviathan', blurb: 'A slow fortress with heavy guns', skills: ['nova', 'brace'], learn: ['fire', 'repair'], stats: { dmgMul: 1.5, maxSpeed: 8.5, turn: 0.62, hp: 150, cannons: 6, range: 36, reloadTime: 3.6, crew: 50 } },
 ];
 export function makePlayer(i, x = 0, z = 0, h = 0) {
   const { type, name, stats, skills, learn } = PLAYER_SHIPS[i];
   const { hp, crew, ...rest } = stats;
   return Object.assign(makeShip(type, 0, x, z, h), rest, {
-    hp, maxHp: hp, crew, maxCrew: crew, name, regen: 0.012, skills: skills.map((id) => ({ id, lvl: 1 })), learn: [...learn],
+    hp, maxHp: hp, crew, maxCrew: crew, name, regen: 0.012, dealt: {}, skills: skills.map((id) => ({ id, lvl: 1 })), learn: [...learn],
   });
 }
 
@@ -152,9 +153,12 @@ const ARC_T = (ARC_VY + Math.sqrt(ARC_VY ** 2 + 2 * BALL.g * BALL.y0)) / BALL.g;
 // Short-handed guns reload slower: half the crew → +40% reload time.
 export const crewMul = (s) => (s.maxCrew ? 1 + 0.8 * (1 - s.crew / s.maxCrew) : 1);
 
-export function damage(s, d) {
+// by / how: who dealt it and with what ('gun' | 'pb' | 'keg' | 'ram' | 'board'). Only pirates keep the count (makePlayer's
+// `dealt`): the play style shown at the end of a run (store.js styleOf).
+export function damage(s, d, by, how) {
   if (!s.alive) return;
   if (s.armorT > 0) d *= 0.4; // Brace
+  if (by?.dealt) by.dealt[how] = (by.dealt[how] || 0) + Math.min(d, s.hp);
   if (s.maxCrew) s.crew = Math.max(1, s.crew - (Math.min(d, s.hp) / s.maxHp) * s.maxCrew * 0.6); // hits kill crew too
   s.hp = Math.max(0, s.hp - d);
   s.calm = 0;
@@ -184,7 +188,7 @@ export function fireBroadside(s, side, rand = Math.random) {
 function makeBall(s, x, z, dx, dz, sp, delay) {
   return {
     x, y: BALL.y0, z, vx: dx * sp + Math.cos(s.h) * s.speed, vy: ARC_VY, vz: dz * sp + Math.sin(s.h) * s.speed,
-    team: s.team, dmg: BALL.dmg * s.dmgMul, delay, ox: dx, oz: dz, x0: x, z0: z,
+    team: s.team, by: s, dmg: BALL.dmg * s.dmgMul, delay, ox: dx, oz: dz, x0: x, z0: z,
   };
 }
 
@@ -202,7 +206,7 @@ export function stepBall(b, dt, ships) {
     if (s.isl ? Math.hypot(dx, dz) < shoreR(s.isl, Math.atan2(dz, dx)) : Math.abs(lx) < s.len / 2 && Math.abs(lz) < s.beam * 0.6) { // a fort: its whole island
       s.lastHit = b.team; // kill credit (PvP)
       const pb = Math.hypot(b.x - b.x0, b.z - b.z0) < BALL.pb; // a fort's ball carries no origin: NaN, never point-blank
-      damage(s, b.dmg * (pb ? BALL.pbMul : 1));
+      damage(s, b.dmg * (pb ? BALL.pbMul : 1), b.by, pb ? 'pb' : 'gun');
       if (b.ammo?.id === 'chain') s.slowT = Math.max(s.slowT, 3 * b.ammo.p);
       if (b.ammo?.id === 'fire') s.burnT = Math.max(s.burnT, 4 * b.ammo.p);
       return { hit: s, pb };
@@ -234,8 +238,9 @@ export function collideShips(ships) {
       const closing = (Math.cos(a.h) * a.speed - Math.cos(b.h) * b.speed) * nx + (Math.sin(a.h) * a.speed - Math.sin(b.h) * b.speed) * nz;
       if (closing > 3 && !allied(a.team, b.team)) { // allies just bump
         a.lastHit = b.team; b.lastHit = a.team;
-        damage(a, closing * 1.2);
-        damage(b, closing * 1.2);
+        // by size: a galleon (14) running down a sloop (8) deals ×1.75 and takes ×0.57
+        damage(a, (closing * 1.2 * b.len) / a.len, b, 'ram');
+        damage(b, (closing * 1.2 * a.len) / b.len, a, 'ram');
         a.speed *= 0.4; b.speed *= 0.4;
         rams.push({ x: a.x + nx * a.len * 0.3, z: a.z + nz * a.len * 0.3, a, b });
       }
@@ -540,7 +545,7 @@ export function useSkill(s, slot) {
   else if (id === 'boost') { s.boostT = 3 * p; s.sail = 3; }
   else if (id === 'smoke') s.smokeT = 4 * p;
   else if (id === 'repair') s.hp = Math.min(s.maxHp, s.hp + s.maxHp * (0.2 + 0.1 * (lvl - 1)));
-  else if (id === 'keg') out.keg = { x: s.x - Math.cos(s.h) * s.len * 0.65, z: s.z - Math.sin(s.h) * s.len * 0.65, team: s.team, r: 6, dmg: 25 * p, life: 30 };
+  else if (id === 'keg') out.keg = { x: s.x - Math.cos(s.h) * s.len * 0.65, z: s.z - Math.sin(s.h) * s.len * 0.65, team: s.team, by: s, r: 6, dmg: 25 * p, life: 30 };
   return out;
 }
 // Floating mine: 'boom' (damages every enemy in range) when one comes close, 'gone' when it expires.
@@ -548,6 +553,6 @@ export function stepKeg(k, dt, ships) {
   if ((k.life -= dt) <= 0) return 'gone';
   const near = (s) => s.alive && s.team !== k.team && Math.hypot(s.x - k.x, s.z - k.z) < k.r + s.len * 0.3;
   if (!ships.some(near)) return null;
-  for (const s of ships.filter(near)) { s.lastHit = k.team; damage(s, k.dmg); }
+  for (const s of ships.filter(near)) { s.lastHit = k.team; damage(s, k.dmg, k.by, 'keg'); }
   return 'boom';
 }

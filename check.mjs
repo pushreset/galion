@@ -1,5 +1,6 @@
 // node check.mjs — asserts on the pure sim, and on what the menus store.
 import assert from 'node:assert/strict';
+import { styleOf } from './store.js';
 import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, fireMortar, MORTAR, waveSpec, UPGRADES, SKILLS, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul } from './sim.js';
 
 WIND.k = 0; // the checks below are written for still air; the wind block turns it back on
@@ -80,6 +81,43 @@ for (const h of [0, 1, -2.3]) {
   collideShips([a, b]);
   assert.ok(Math.hypot(a.x - b.x, a.z - b.z) >= (a.len + b.len) * 0.32 - 1e-9);
   assert.ok(a.hp < a.maxHp, 'ram should damage');
+}
+// a ram hurts by size: a galleon running down a sloop takes little and deals a lot
+{
+  const g = makeShip('galleon', 0, 0, 0, 0), s = makeShip('sloop', 1, 2, 0, Math.PI);
+  g.speed = s.speed = 8;
+  collideShips([g, s]);
+  assert.ok(s.maxHp - s.hp > 2.5 * (g.maxHp - g.hp), 'the sloop should take far more than the galleon');
+}
+// heavy guns: a full Leviathan broadside sinks a navy sloop, a Wasp's does not
+{
+  const dmg = (i) => fireBroadside(makePlayer(i), 1, r0).reduce((a, b) => a + b.dmg, 0);
+  assert.ok(dmg(2) >= makeShip('sloop', 1).hp * 2 && dmg(0) < makeShip('sloop', 1).hp, 'Leviathan one-shots a sloop, the Wasp does not');
+}
+// play style: a pirate's damage is counted by source (the navy's is not), styleOf names the run
+{
+  const p = makePlayer(0, 0, 0, 0), far = makeShip('galleon', 1, 0, 20, 0), near = makeShip('galleon', 1, 0, 5, 0);
+  const shoot = (tgt) => { p.reload.star = 0; for (const b of fireBroadside(p, 1, r0)) for (let i = 0; i < 600; i++) if (stepBall(b, 1 / 120, [tgt])) break; };
+  shoot(far);
+  assert.deepEqual(p.dealt, { gun: far.maxHp - far.hp });
+  shoot(near);
+  assert.equal(p.dealt.pb, near.maxHp - near.hp, 'a point-blank hit counts apart');
+  const foe = makeShip('sloop', 1, 100, 100), { keg } = useSkill(p, 1);
+  Object.assign(foe, { x: keg.x, z: keg.z });
+  stepKeg(keg, 0.1, [foe]);
+  assert.equal(p.dealt.keg, foe.maxHp - foe.hp);
+  const navy = makeShip('brig', 1, 2, 0, Math.PI);
+  p.speed = navy.speed = 8;
+  collideShips([p, navy]);
+  assert.ok(Math.abs(p.dealt.ram - (navy.maxHp - navy.hp)) < 1e-9);
+  assert.equal(navy.dealt, undefined, 'the navy keeps no count');
+  const last = makeShip('sloop', 1);
+  last.hp = 5; damage(last, 1e9, p, 'board');
+  assert.equal(p.dealt.board, 5, 'only the hull that was left counts');
+  assert.equal(styleOf({}), null);
+  assert.equal(styleOf({ gun: 100, keg: 60 }).id, 'keg', 'kegs weigh more than guns');
+  assert.equal(styleOf({ gun: 100, keg: 40 }).id, 'gun');
+  assert.equal(styleOf({ gun: 75, pb: 25, junk: 'x' }).share.pb, 0.25);
 }
 // AI ends up abeam of a stationary target and fires
 {
@@ -188,7 +226,7 @@ for (const h of [0, 1, -2.3]) {
 // every gun, even a range-upgraded Leviathan, hits a target abeam at any distance up to its range (no lob over)
 for (const range of [26, 36, 36 * 1.15 ** 2]) {
   for (let d = 8; d <= range * 0.9; d += 3) {
-    const s = makePlayer(2), tgt = makeShip('brig', 1, 0, d, 0);
+    const s = makePlayer(2), tgt = Object.assign(makeShip('brig', 1, 0, d, 0), { hp: 1e9 }); // unsinkable: her heavy guns would sink the brig before the last ball lands
     s.range = range;
     const hits = fireBroadside(s, 1, r0).filter((b) => { for (let i = 0; i < 600; i++) { const ev = stepBall(b, 1 / 120, [tgt]); if (ev) return ev.hit; } }).length;
     assert.equal(hits, s.cannons, `range ${range.toFixed(0)} missed a target at ${d}`);

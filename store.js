@@ -70,6 +70,16 @@ export function markWorld(board, at, rank) {
   if (row) { row.world = rank; set('best', best); }
 }
 
+// Play style: what a pirate's damage was dealt with (sim.js damage) → { id: the source that names the style, share: each source's part } | null.
+// ponytail: W is a hand-set knob, never play-tested: unweighted, guns would name nearly every run. Tune it once players disagree with their title.
+export const STYLES = ['gun', 'pb', 'keg', 'ram', 'board'];
+const W = { gun: 1, pb: 2, keg: 2, ram: 3, board: 2 };
+export function styleOf(dealt) {
+  const d = Object.fromEntries(STYLES.map((k) => [k, Math.max(0, +dealt?.[k] || 0)])), sum = STYLES.reduce((a, k) => a + d[k], 0);
+  if (!sum) return null;
+  return { id: STYLES.reduce((a, k) => (d[k] * W[k] > d[a] * W[a] ? k : a)), share: Object.fromEntries(STYLES.map((k) => [k, d[k] / sum])) };
+}
+
 export const store = {
   get name() { return cleanName(get('name') ?? raw('gallion-nick')); }, // '': the name screen. gallion-nick: the old lobby field
   set name(v) { set('name', cleanName(v)); },
@@ -91,4 +101,7 @@ export const store = {
   get lang() { const l = get('lang'); return l === 'en' || l === 'fr' ? l : typeof navigator !== 'undefined' && /^fr/i.test(navigator.language || '') ? 'fr' : 'en'; },
   set lang(v) { set('lang', v); },
   get best() { return loadBest(); },
+  // damage by source over every run on this browser (styleOf reads it); a run is added by assigning its own count
+  get style() { return get('style') || {}; },
+  set style(run) { const all = this.style; set('style', Object.fromEntries(STYLES.map((k) => [k, (+all[k] || 0) + (+run?.[k] || 0)]))); },
 };

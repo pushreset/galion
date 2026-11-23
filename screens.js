@@ -3,7 +3,7 @@
 import * as ui from './ui.js';
 import { screens, esc, keyLabel } from './ui.js';
 import { t, tn, tk, lang, setLang } from './i18n.js';
-import { store, cleanName, rollName, rebind, swapKeys, DEFAULT_KEYS, SHIPS, boardOf } from './store.js';
+import { store, cleanName, rollName, rebind, swapKeys, DEFAULT_KEYS, SHIPS, boardOf, styleOf } from './store.js';
 
 const mine = (row, name) => row.crew.some((c) => c.name === name);
 
@@ -11,6 +11,14 @@ const SKULL = 'M3 0h6v1h-6z M2 1h8v1h-8z M1 2h10v1h-10z M1 3h1v2h-1z M4 3h4v2h-4
 const skull = (w, shadow) => `<svg width="${w}" height="${w * 0.75}" viewBox="0 0 12 9" shape-rendering="crispEdges" aria-hidden="true">` +
   `${shadow ? `<path fill="#1b110b" transform="translate(0.5 0.5)" d="${SKULL}"/>` : ''}<path fill="#f5ecd2" d="${SKULL} M3 8h1v1h-1z M5 8h2v1h-2z M8 8h1v1h-1z"/></svg>`;
 const logo = (top) => `<div class="bs-abs bs-logo" style="left:0;right:0;top:${top}px;text-align:center;font-size:32px;line-height:32px;letter-spacing:3px;text-shadow:2px 2px 0 var(--bs-trim-hi),4px 4px 0 var(--bs-wood-edge)">BROADSIDE</div>`;
+// a play style (store.js styleOf): its title, then each source's share of the damage, biggest first. '' before any damage
+const STYLE = { gun: [tk('GUNNER'), tk('GUNS')], pb: [tk('HOTHEAD'), tk('POINT BLANK')], keg: [tk('SABOTEUR'), tk('KEGS')], ram: [tk('RAMMER'), tk('RAM')], board: [tk('BOARDER'), tk('BOARDING')] };
+function styleLine(dealt, label) {
+  const s = styleOf(dealt);
+  if (!s) return '';
+  const parts = Object.entries(s.share).map(([k, v]) => [k, Math.round(v * 100)]).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  return `<span class="bs-dim" style="letter-spacing:1px">${label} · <span class="bs-gold">${t(STYLE[s.id][0])}</span></span><span class="bs-dim">${parts.map(([k, v]) => `${t(STYLE[k][1])} ${v}%`).join(' · ')}</span>`;
+}
 const num = (n) => (+n).toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US');
 
 // A name field (name screen, settings): A to Z, 12 at most. A refused key flashes it red.
@@ -95,7 +103,7 @@ export function initScreens(g) {
     hints: () => [[['↑', '↓'], 'CHOOSE'], [['ENTER'], 'CONFIRM'], [[g.muteLabel()], 'SOUND']],
     render(el, props) {
       props.ship = SHIPS.indexOf(store.lastShip);
-      const mode = store.lastMode, ship = g.ships[props.ship], best = store.best[mode][0];
+      const mode = store.lastMode, ship = g.ships[props.ship], best = store.best[mode][0], style = styleLine(store.style, t('YOUR STYLE'));
       const item = (f, title, sub, extra = '') => `<button class="bs-btn" data-f="${f}"${extra}><span>${title}</span><span>${sub}</span></button>`;
       el.innerHTML = `<div class="bs-abs bs-logo bs-logo--s" style="left:64px;top:52px">BROADSIDE</div>
         <div class="bs-abs bs-chip" style="right:32px;top:28px">${skull(16)}<span class="bs-dim">${t('CAPTAIN')}</span><span class="bs-gold" style="font-size:16px;line-height:16px;letter-spacing:1px">${esc(store.name)}</span><button class="bs-btn bs-btn--s" data-f="edit" aria-label="${t('Change name')}">${t('EDIT')}</button></div>
@@ -106,8 +114,8 @@ export function initScreens(g) {
           ${item('board', t('LEADERBOARD'), t('WAVES · CONVOY · WORLD'), screens.leaderboard ? '' : ' disabled')}
           ${item('settings', t('SETTINGS'), t('SOUND · CONTROLS · LANGUAGE'), screens.settings ? '' : ' disabled')}
         </nav>
-        ${best ? `<div class="bs-abs bs-chip bs-col" style="right:32px;bottom:44px;align-items:flex-end;gap:4px;padding:8px 12px"><span class="bs-dim" style="letter-spacing:1px">${t('YOUR BEST')} · ${t(MODE[mode].name)}</span>
-          <span style="font-size:16px;line-height:16px">${t(MODE[mode].unit)} ${best.wave} · <span class="bs-gold">${t('{0} GOLD', num(best.gold))}</span>${best.world ? ` · ${t('#{0} WORLD', best.world)}` : ''}</span></div>` : ''}`;
+        ${best || style ? `<div class="bs-abs bs-chip bs-col" style="right:32px;bottom:44px;align-items:flex-end;gap:4px;padding:8px 12px">${best ? `<span class="bs-dim" style="letter-spacing:1px">${t('YOUR BEST')} · ${t(MODE[mode].name)}</span>
+          <span style="font-size:16px;line-height:16px">${t(MODE[mode].unit)} ${best.wave} · <span class="bs-gold">${t('{0} GOLD', num(best.gold))}</span>${best.world ? ` · ${t('#{0} WORLD', best.world)}` : ''}</span>` : ''}${style}</div>` : ''}`;
       return { acts: {
         sail: () => g.startSolo(mode, props.ship),
         solo: () => ui.open('solo-mode'),
@@ -200,7 +208,7 @@ export function initScreens(g) {
     veil: 0.72,
     hints: (p) => (p.online ? [[['←', '→'], 'CHOOSE'], [['ESC'], 'MAIN MENU']] : [[['SPACE'], 'SAIL AGAIN'], [['←', '→'], 'CHOOSE'], [['ESC'], 'MAIN MENU']]),
     render(el, props) {
-      const { entry: e, top, rank, name } = props, m = MODE[e.mode], solo = e.crew.length === 1;
+      const { entry: e, top, rank, name } = props, m = MODE[e.mode], solo = e.crew.length === 1, style = styleLine(props.dealt, t('STYLE'));
       // an older row of ours further down: how many places this run gained on it
       const old = rank < 0 ? -1 : top.findIndex((r, i) => i > rank && mine(r, name));
       const gain = old - rank - 1;
@@ -213,6 +221,7 @@ export function initScreens(g) {
           <span class="bs-dim" style="letter-spacing:1px">${t(m.name)} · ${solo ? `SOLO · ${e.crew[0].ship.toUpperCase()}` : t('CREW OF {0}', e.crew.length)}</span></div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-self:stretch">${[[t(m.unit), e.wave, ''], [t('GOLD'), num(e.gold), 'var(--bs-gold)'], [t('BEST COMBO'), '×' + e.combo, 'var(--bs-orange)']].map(([l, v, c]) =>
           `<div class="bs-col" style="padding:8px;background:var(--bs-wood-edge);align-items:center;gap:4px"><span class="bs-dim">${l}</span><span style="font-size:24px;line-height:24px;color:${c}">${v}</span></div>`).join('')}</div>
+        ${style && `<div class="bs-col" style="align-items:center;gap:2px">${style}</div>`}
         ${props.best ? `<div class="bs-badge" style="padding:4px 12px;font-size:16px;line-height:16px;letter-spacing:1px">${t('NEW PERSONAL BEST')}</div>` : ''}
         <div class="bs-col" style="gap:2px;align-self:stretch"><div class="bs-row bs-dim" style="justify-content:space-between;padding:0 8px 4px"><span>${t('SIGNED AS')} <span class="bs-gold">${esc(name)}</span></span><span>${ranks}</span></div>
           ${top.slice(from, from + 4).map((r, i) => row(r, from + i)).join('')}</div>

@@ -516,7 +516,7 @@ function startWave(k) {
 // a ship's six stats against the best of the three (1 = the top of its gauge)
 const shipStats = (s) => [
   ['SPEED', s.maxSpeed / 14], ['HANDLING', s.turn / 1.4], ['HULL', s.maxHp / 150],
-  ['GUNS', s.cannons / 6], ['RELOAD', 2.4 / s.reloadTime], ['CREW', s.maxCrew / 50],
+  ['GUNS', (s.cannons * s.dmgMul) / 9], ['RELOAD', 2.4 / s.reloadTime], ['CREW', s.maxCrew / 50],
 ];
 // Fingers: a #touch button is its action's key, a skill slot its skill's key. A touch stays with the button it landed on
 // (implicit pointer capture), so one thumb can hold the helm while the other fires.
@@ -958,7 +958,8 @@ function endRun() {
   const crew = [...players].sort((a, b) => a.pid - b.pid).map((p) => ({ name: p.tag, ship: String(p.name).toLowerCase() })); // online: the whole crew signs, in seat order
   const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: state.wave, gold: state.gold, combo: combo.best, at: Date.now() };
   const local = signLocal(board, entry);
-  const res = { entry, board, name: me?.tag || store.name, online: net !== 'solo', best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
+  const res = { entry, board, name: me?.tag || store.name, online: net !== 'solo', dealt: me?.dealt, best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
+  store.style = me?.dealt; // added to this browser's running count (the menu's YOUR STYLE)
   held.clear();
   ui.open('gameover', res);
   if (local.rank === 0) sfx.fanfare();
@@ -1242,7 +1243,7 @@ function capture(p, e, b) {
   p.boardCd = 2;
   if (r.crew >= 1) popup(p.x, p.z, [tk('+{0} CREW'), r.crew]);
   e.wrecked = true; // plunder paid directly: no barrels on top
-  damage(e, 1e9);
+  damage(e, 1e9, p, 'board');
   sound('sink', e.x, e.z);
   if (p === me) sfx.coin();
   banner([e.merchant ? (b ? tk('MERCHANT CAPTURED') : tk('MERCHANT CAPTURED · STRUCK HER COLOURS')) : b ? tk('SHIP CAPTURED') : tk('SHIP CAPTURED · STRUCK HER COLOURS')], 2);
@@ -1270,7 +1271,7 @@ function skillHud() {
 // --- online: host snapshots, guest rendering, lobby -----------------------------
 // Ships go as arrays in SF order (compact); pirates add a PF object with what the HUD needs.
 const SF = ['id', 'type', 'livery', 'team', 'x', 'z', 'h', 'speed', 'turnRate', 'sail', 'hp', 'maxHp', 'alive', 'sinkT', 'burnT', 'smokeT', 'cannons', 'escaped', 'pid', 'merchant'];
-const PF = ['pid', 'tag', 'name', 'reload', 'reloadTime', 'crew', 'maxCrew', 'skills', 'cd', 'ammo', 'boardCd', 'cards', 'kills', 'fix'];
+const PF = ['pid', 'tag', 'name', 'reload', 'reloadTime', 'crew', 'maxCrew', 'skills', 'cd', 'ammo', 'boardCd', 'cards', 'kills', 'fix', 'dealt'];
 const SNAP_DT = 0.05; // 20 Hz
 let snapT = 0;
 function snap() {

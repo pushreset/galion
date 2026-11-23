@@ -25,6 +25,8 @@ export const FR = {
   'CAPTAIN': 'CAPITAINE', 'Change name': 'Changer de nom', 'EDIT': 'MODIFIER', '(YOUR LAST VOYAGE)': '(TON DERNIER VOYAGE)',
   'PICK A MODE AND A SHIP': 'CHOISIS UN MODE ET UN NAVIRE', 'ONLINE': 'EN LIGNE', 'CO-OP OR PVP · 2 TO 4 PIRATES': 'COOP OU PVP · 2 À 4 PIRATES',
   'LEADERBOARD': 'CLASSEMENT', 'WAVES · CONVOY · WORLD': 'VAGUES · CONVOI · MONDE', 'SETTINGS': 'RÉGLAGES', 'SOUND · CONTROLS · LANGUAGE': 'SON · TOUCHES · LANGUE',
+  'STYLE': 'STYLE', 'YOUR STYLE': 'TON STYLE', 'GUNNER': 'CANONNIER', 'HOTHEAD': 'TÊTE BRÛLÉE', 'SABOTEUR': 'SABOTEUR', 'RAMMER': 'BÉLIER', 'BOARDER': 'FLIBUSTIER',
+  'KEGS': 'BARILS', 'RAM': 'ÉPERON', 'BOARDING': 'ABORDAGE',
   'YOUR BEST': 'TON RECORD', '{0} GOLD': '{0} OR', '#{0} WORLD': '#{0} MONDIAL',
   // modes
   'WAVES': 'VAGUES', 'WAVE': 'VAGUE', 'CONVOY': 'CONVOI',
@@ -41,7 +43,7 @@ export const FR = {
   'SPEED': 'VITESSE', 'HANDLING': 'MANŒUVRE', 'HULL': 'COQUE', 'GUNS': 'CANONS', 'RELOAD': 'RECHARGE', 'CREW': 'ÉQUIPAGE',
   'STARTING SKILLS': 'COMPÉTENCES DE DÉPART', 'SLOTS 3 AND 4 UNLOCK AT SEA': 'LES EMPLACEMENTS 3 ET 4 SE DÉBLOQUENT EN MER',
   'Previous ship': 'Navire précédent', 'Next ship': 'Navire suivant',
-  'Fast and nimble, but fragile': 'Rapide et agile, mais fragile', 'A balanced raider': 'Un pillard équilibré', 'A slow floating fortress': 'Une lente forteresse flottante',
+  'Fast and nimble, but fragile': 'Rapide et agile, mais fragile', 'A balanced raider': 'Un pillard équilibré', 'A slow fortress with heavy guns': 'Une forteresse lente aux canons lourds',
   // skills, refit cards (sim.js SKILLS, UPGRADES). Skill names: 12 letters at most, they sit under a 60 px slot
   'Chain shot': 'Tir ramé', 'next broadside slows what it hits': 'la prochaine bordée ralentit ce qu\'elle touche',
   'Fire shot': 'Tir ardent', 'next broadside sets ships ablaze': 'la prochaine bordée embrase les navires',

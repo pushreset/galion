@@ -101,11 +101,11 @@ for (const [w, h, dpr, want] of [[960, 540, 1, 1], [1440, 900, 1, 1], [1920, 108
   await p.keyboard.press('Escape'); assert.deepEqual([await top(p), await focus(p)], ['pause', 'quit']);
   await p.keyboard.press('Escape'); assert.equal(await top(p), undefined);
   // sunk: the run is signed with the name, kept on this browser, and the world board is out of reach
-  await p.evaluate(() => { __game.startWave(3); __game.state.gold = 840; __game.combo.best = 3; });
+  await p.evaluate(() => { __game.startWave(3); __game.state.gold = 840; __game.combo.best = 3; __game.player.dealt = { gun: 300, pb: 90, keg: 420, ram: 30 }; });
   await sink(p);
   assert.equal(await top(p), 'gameover');
   await sleep(500);
-  assert.match(await text(p), /SUNK WAVES · SOLO · CORSAIR.*NEW PERSONAL BEST.*SIGNED AS BLACKBEARDXY.*#1 THIS BROWSER/);
+  assert.match(await text(p), /SUNK WAVES · SOLO · CORSAIR.*STYLE · SABOTEUR ?KEGS 50% · GUNS 36% · POINT BLANK 11% · RAM 4%.*NEW PERSONAL BEST.*SIGNED AS BLACKBEARDXY.*#1 THIS BROWSER/); // the play style: what the damage was dealt with
   assert.match(await text(p, '.bs-over-row.is-you'), /1 ?BLACKBEARDXY ?3 ?840 ?×3/);
   assert.match(await text(p, '#ui-toasts'), /WORLD BOARD UNREACHABLE · SAVED ON THIS BROWSER/);
   assert.deepEqual((await ls(p, 'best')).waves.map((r) => [r.crew[0].name, r.crew[0].ship, r.wave, r.gold, r.combo]), [['BLACKBEARDXY', 'corsair', 3, 840, 3]]);
@@ -114,7 +114,7 @@ for (const [w, h, dpr, want] of [[960, 540, 1, 1], [1440, 900, 1, 1], [1920, 108
   await p.keyboard.press('ArrowDown'); assert.equal(await focus(p), 'menu');
   await p.keyboard.press('Enter'); await ready(p); // MAIN MENU
   assert.deepEqual([await top(p), await focus(p)], ['menu', 'sail'], 'SET SAIL is there once a run was played');
-  assert.match(await text(p), /WAVES · SOLO · CORSAIR \(YOUR LAST VOYAGE\).*YOUR BEST · WAVES WAVE 3 · 840 GOLD/);
+  assert.match(await text(p), /WAVES · SOLO · CORSAIR \(YOUR LAST VOYAGE\).*YOUR BEST · WAVES WAVE 3 · 840 GOLD.*YOUR STYLE · SABOTEUR/); // the style adds up over the runs of this browser
   await p.keyboard.press('Enter');
   await sink(p);
   await p.keyboard.press('Space'); await ready(p); // SAIL AGAIN: straight into a run, same mode and ship
@@ -266,8 +266,9 @@ if (SHOTS) for (const [w, h] of [[960, 540], [1440, 900], [1920, 1080]]) {
   await p.click('[data-f=sail]');
   await p.keyboard.press('KeyP'); await p.click('[data-f=quit]'); await shot('11-pause');
   await p.keyboard.press('Escape'); await p.keyboard.press('Escape');
-  await p.evaluate(() => { __game.startWave(6); __game.state.gold = 900; __game.combo.best = 3; });
+  await p.evaluate(() => { __game.startWave(6); __game.state.gold = 900; __game.combo.best = 3; __game.player.dealt = { gun: 300, pb: 90, keg: 420, ram: 30 }; });
   await sink(p); await shot('10-gameover');
+  await p.keyboard.press('Escape'); await ready(p); await shot('03b-menu-style');
   await p.context().close();
 }
 
