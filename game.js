@@ -122,7 +122,7 @@ function addShip(type, livery, team, x, z, h, sail = 0, s = makeShip(type, team,
   s.sail = sail;
   s.id ??= nextId++;
   s.livery = livery;
-  s.mesh = BOSS[type] ? buildBoss(type) : buildShip(type, livery, s.cannons);
+  s.mesh = Object.hasOwn(BOSS, type) ? buildBoss(type) : buildShip(type, livery, s.cannons);
   s.seed = Math.random() * 10;
   s.wakeT = 0;
   scene.add(s.mesh.root);
@@ -304,7 +304,7 @@ function castSkill(p, slot) {
 let paused = false;
 function openPause() {
   if (state.mode === 'select' || (net === 'guest' && guestShip === null)) return; // no run yet
-  if (state.mode === 'dead') return; // sunk: the end screen is 3 s away, and a paused world would never get there to sign the run
+  if (state.mode === 'dead' || state.mode === 'won') return; // sunk, or the last boss beaten: the end screen is 3 s away, and a paused world would never get there to sign the run
   held.clear(); // a key released under the overlay never sends keyup to the game
   if (net === 'solo') { paused = true; setPaused(true); }
   ui.open('pause', { online: net !== 'solo' });
@@ -551,7 +551,7 @@ const BOSSES_N = Object.keys(BOSS).length;
 const FADE_OUT = 1.4, FADE_IN = 0.7; // s for a spectral boss to vanish, and to be back
 const DIVE_T = 0.9, RISE_T = 0.55, DIVE_DEPTH = 10; // s to go under, s to come up, how deep the model sinks (the serpent's head stands 8 tall)
 // ?boss=serpent&lvl=6: a boss run that opens on that boss at that level (to try one without playing up to it)
-const dev = (() => { const q = new URLSearchParams(location.search), id = q.get('boss'); return BOSS[id] ? { id, lvl: Math.max(1, Math.min(BOSSES_N, +q.get('lvl') || 1)) } : null; })();
+const dev = (() => { const q = new URLSearchParams(location.search), id = q.get('boss'); return id && Object.hasOwn(BOSS, id) ? { id, lvl: Math.max(1, Math.min(BOSSES_N, +q.get('lvl') || 1)) } : null; })();
 function spawnBoss(id, lvl) {
   let [x, z] = spawnPoint(), P = nearestPlayer({ x, z }) || { x: 0, z: 0 }, h = Math.atan2(P.z - z, P.x - x);
   if (BOSS[id].fixed) { // Scylla's rock stays where it rises: her whirlpool, behind her, needs open water too (bossfight.js PULL)
@@ -567,8 +567,8 @@ function spawnBoss(id, lvl) {
   banner([tk('BOSS {0} / {1} · {2}'), state.wave, BOSSES_N, t(BOSS_NAME[id])], 3);
 }
 // what the boss did this frame (bossfight.js bossStep), with the functions the navy, the fort and the skills already use
-function bossActs(s, out) {
-  if (out.fire) fire(s, out.fire);
+function bossActs(s, out, tgt) {
+  if (out.fire && !(tgt.smokeT > 0)) fire(s, out.fire); // smoke screen: her gunners can't see you either
   pending.push(...out.balls);
   for (const sl of out.slams) { addSlam(sl); if (sl.head) s.mesh.bite?.(sl, s); } // head: one of the model's heads goes for it
   if (out.cue) s.mesh.cue?.(...out.cue); // a gesture to act out
@@ -817,7 +817,7 @@ function updateEnemies(dt) {
   for (const s of ships) {
     if (s.team !== 1 || !s.alive) continue;
     let tgt = nearestPlayer(s);
-    if (s.boss) { bossActs(s, bossStep(s, dt, { target: tgt, ships })); continue; }
+    if (s.boss) { bossActs(s, bossStep(s, dt, { target: tgt, ships }), tgt); continue; }
     if (s.escort === 'guard') {
       // ward: kept until she's gone, then the merchant with the fewest guards (closest on a tie); station: the free side, further out per pair
       if (!(s.ward?.alive && !s.ward.escaped)) {
@@ -950,7 +950,9 @@ function drawSlam(sl) {
         wakes.spawn(sl.x + Math.cos(a) * r, sl.z + Math.sin(a) * r, 1.1, -Math.cos(a) * v, -Math.sin(a) * v, 0.9);
       }
     }
-    if (f) shell.position.set((f.x - sl.x) * k, 7 * k + 110 * k * (1 - k), (f.z - sl.z) * k); // a high arc from the fort
+    const sc = sl.mesh.scale.x; // the zone's size (addSlam): the shell, its child, is kept out of it
+    shell.scale.setScalar(1 / sc);
+    if (f) shell.position.set(((f.x - sl.x) * k) / sc, (7 * k + 110 * k * (1 - k)) / sc, ((f.z - sl.z) * k) / sc); // a high arc from the fort
     return;
   }
   const k = Math.max(0, sl.t) / SLAM.t; // 1 → 0
@@ -1066,7 +1068,7 @@ function gameOver() {
 function endRun() {
   const m = bossRun ? 'boss' : convoy ? 'convoy' : 'waves', won = state.mode === 'won';
   const crew = [...players].sort((a, b) => a.pid - b.pid).map((p) => ({ name: p.tag, ship: String(p.name).toLowerCase() })); // online: the whole crew signs, in seat order
-  const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: bossRun ? Math.max(0, state.wave - (won ? 0 : 1)) : state.wave, gold: state.gold, combo: combo.best, at: Date.now() }; // boss mode: bosses beaten
+  const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: bossRun ? Math.max(0, state.wave - (state.boss?.alive ? 1 : 0)) : state.wave, gold: state.gold, combo: combo.best, at: Date.now() }; // boss mode: bosses beaten (state.wave names the one being fought, or the last one sunk)
   const local = signLocal(board, entry), dealt = { ...me?.dealt }; // a copy: a keg still afloat may add to the count after the screen is up
   const res = { won, entry, board, name: me?.tag || store.name, online: net !== 'solo', dealt, best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
   store.style = dealt; // added to this browser's running count (the menu's YOUR STYLE)
@@ -1818,7 +1820,7 @@ rekey();
 // broadside.boot: a reload asked for by the menus (a run starts from a fresh page) says where to land
 let boot = null;
 try { boot = sessionStorage.getItem('broadside.boot'); sessionStorage.removeItem('broadside.boot'); } catch {}
-if (dev && store.name) startSolo('boss', Math.max(0, SHIPS.indexOf(store.lastShip))); // ?boss=…: straight into that fight
+if (dev && store.name && (!boot || boot === 'sail')) startSolo('boss', Math.max(0, SHIPS.indexOf(store.lastShip))); // ?boss=…: straight into that fight (and again on SAIL AGAIN); a reload the menus asked for still lands where they said
 else if (!store.name || !boot) ui.open('title');
 else if (boot === 'sail') startSolo(store.lastMode, SHIPS.indexOf(store.lastShip)); // SAIL AGAIN: same mode, same ship
 else if (boot === 'ship') ui.reset('menu', 'solo-mode', 'ship');

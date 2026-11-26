@@ -371,12 +371,12 @@ function dutchman() {
   const own = new Map(), casters = [];
   m.root.traverse((o) => {
     if (!o.material) return;
-    if (!own.has(o.material)) own.set(o.material, o.material.clone());
+    if (!own.has(o.material)) own.set(o.material, Object.assign(o.material.clone(), { transparent: true })); // from the start: nothing to recompile when the fade begins
     o.material = own.get(o.material);
     if (o.castShadow) casters.push(o);
   });
   m.fade = (a) => {
-    for (const c of own.values()) { c.opacity = a; c.transparent = a < 1; c.depthWrite = a > 0.4; }
+    for (const c of own.values()) { c.opacity = a; c.depthWrite = a > 0.4; }
     for (const o of casters) o.castShadow = a > 0.5;
   };
   m.anim = (t) => {
@@ -475,9 +475,10 @@ function whale() {
   spout.position.set(6.6, 1.7, 0.7);
   for (let k = 0; k < 6; k++) spout.add(lamp(0.3, 0.5, 0.3, 0.25 * k + (k % 2) * 0.2, 0.5 + k * 0.55, (k % 3 - 1) * 0.3, '#f4fffb'));
   g.add(spout);
-  const foam = ring(1, 1.1, 28);
-  foam.scale.set(8.6, 1, 3.2);
-  foam.position.x = -0.4;
+  const foam = new THREE.Group(), rim = ring(1, 1.1, 28); // the ellipse on a child: game.js scales the foam itself with her speed
+  rim.scale.set(8.6, 1, 3.2);
+  rim.position.x = -0.4;
+  foam.add(rim);
   setFoam(m, foam);
   m.anim = (t) => {
     g.position.y = 0.95 + Math.sin(t * 0.7) * 0.3;
