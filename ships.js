@@ -42,11 +42,12 @@ const SPECS = {
 export const LIVERIES = {
   pirate: { sail: ['#2c2c38', '#2c2c38'], emblem: 'skull', trim: '#ad7a48', hull: '#704629', hullLow: '#3f2616', rail: '#3f2616', flag: 'skull' },
   navy: { sail: ['#f5ecd2', '#a52623'], emblem: 'cross', trim: '#a52623', hull: '#8d5c35', hullLow: '#56351f', rail: '#3e0d10', flag: '#a52623' },
+  junk: { sail: ['#a52623', '#a52623'], emblem: null, trim: '#a52623', hull: '#704629', hullLow: '#3f2616', rail: '#3e0d10', flag: '#d84a38' }, // Ching Shih's fleet (bossfight.js)
   merchant: { sail: ['#ddcda6', '#ddcda6'], emblem: null, trim: '#cc9d63', hull: '#8d5c35', hullLow: '#56351f', rail: '#56351f', flag: '#f5ecd2' },
 };
 
-const width = (u, B) => (u >= 0 ? (B / 2) * Math.pow(Math.max(0, 1 - u * u), 0.55) : (B / 2) * (1 - 0.32 * u ** 4));
-const sheer = (u, D) => D + 0.32 * u * u;
+export const width = (u, B) => (u >= 0 ? (B / 2) * Math.pow(Math.max(0, 1 - u * u), 0.55) : (B / 2) * (1 - 0.32 * u ** 4));
+export const sheer = (u, D) => D + 0.32 * u * u;
 
 // --- emblem textures (canvas pixel art, nearest-filtered) -------------------
 const SKULL = [
@@ -98,7 +99,7 @@ function emblemTex(kind, bg) {
 }
 
 // --- hull loft -------------------------------------------------------------
-function hullMesh(sp, lv) {
+export function hullMesh(sp, lv) {
   const { L, B, D } = sp;
   // [width factor, y] rows top→keel. y: number = absolute, string 'd+x' = sheer-relative
   const rows = [[0.88, 0.55, 1], [0.95, 0.12, 1], [0.99, -0.14, 1], [1.0, -0.8, 1], [0.92, -0.02, 0], [0.55, -0.85, 0], [0.0, -1.25, 0]];
@@ -148,20 +149,20 @@ function hullMesh(sp, lv) {
   return m;
 }
 
-function box(w, h, d, hex, x, y, z, extra) {
+export function box(w, h, d, hex, x, y, z, extra) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(hex, extra));
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = true;
   return m;
 }
-function cyl(r0, r1, h, hex, seg = 6) {
+export function cyl(r0, r1, h, hex, seg = 6) {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, h, seg), mat(hex));
   m.castShadow = true;
   return m;
 }
 
 // A square sail spanning the beam (local z), billowing forward (+x).
-function sail(w, h, billow, material) {
+export function sail(w, h, billow, material) {
   const g = new THREE.PlaneGeometry(w, h, 6, 4);
   const p = g.attributes.position;
   for (let i = 0; i < p.count; i++) {
@@ -175,7 +176,7 @@ function sail(w, h, billow, material) {
   return m;
 }
 
-function castle(sp, lv, [u0, u1, h], group) {
+export function castle(sp, lv, [u0, u1, h], group) {
   const { L, B, D } = sp;
   const x0 = (u0 * L) / 2, x1 = (u1 * L) / 2, um = (u0 + u1) / 2;
   const w = width(um, B) * 2 * 0.93;
@@ -205,9 +206,10 @@ export function setGuns(mesh, n) {
     }
   }
 }
-export function buildShip(type, livery, ports = SPECS[type]?.ports) {
+// type / livery: a name from SPECS / LIVERIES, or the spec / livery object itself (bosses.js)
+export function buildShip(type, livery, ports = (SPECS[type] ?? type).ports) {
   if (type === 'kraken') return buildKraken();
-  const sp = SPECS[type], lv = LIVERIES[livery];
+  const sp = SPECS[type] ?? type, lv = LIVERIES[livery] ?? livery;
   const { L, B, D } = sp;
   const root = new THREE.Group();
   const body = new THREE.Group();
@@ -326,7 +328,7 @@ export function buildShip(type, livery, ports = SPECS[type]?.ports) {
   return mesh;
 }
 
-function foamRing(sp) {
+export function foamRing(sp) {
   const { L, B } = sp;
   const N = 28, pos = [];
   const pt = (i, off) => {

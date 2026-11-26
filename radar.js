@@ -95,7 +95,7 @@ export function createRadar(canvas) {
       px(p.x, p.y, 4, fort.active ? '#a52623' : '#6f6f7c');
     }
     for (const s of ships) {
-      if (s === player || (s.team === 0 && !s.isPlayer) || !s.alive || s.escaped) continue;
+      if (s === player || (s.team === 0 && !s.isPlayer) || !s.alive || s.escaped || s.hidden || s.ghost) continue; // a boss under water or spectral: the compass has lost it too
       const ally = s.isPlayer && s.team === player.team;
       const col = ally ? '#94c54c' : s.team === 2 ? '#ffd24a' : s.team === 3 ? '#a552ad' : s.isPlayer ? '#ff7a2a' : '#d84a38'; // crewmates green, merchants gold, kraken purple, rival pirates orange, navy red
       const p = place(s.x, s.z);
@@ -108,7 +108,7 @@ export function createRadar(canvas) {
         g.lineTo(C + Math.cos(p.a - 0.13) * (R - 3), C + Math.sin(p.a - 0.13) * (R - 3));
         g.fill();
       } else {
-        const big = s.type === 'kraken' ? 8 : s.type === 'galleon' ? 6 : s.type === 'brig' ? 5 : 4;
+        const big = s.boss ? 9 : s.type === 'kraken' ? 8 : s.type === 'galleon' ? 6 : s.type === 'brig' ? 5 : 4;
         px(p.x, p.y, big + 2, '#1b110b');
         px(p.x, p.y, big, col);
       }

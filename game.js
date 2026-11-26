@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { PixelPost } from './post.js';
 import { createSea } from './water.js';
 import { buildShip, setGuns, buildTentacle } from './ships.js';
+import { buildBoss } from './bosses.js';
+import { BOSS, bossOrder, makeBoss, bossStep } from './bossfight.js';
 import { createWorld } from './world.js';
 import { createWakes, createFx } from './fx.js';
 import { sfx, unlock, setAudio, setPaused, setCombat } from './sfx.js';
@@ -88,6 +90,13 @@ const fx = createFx(scene, wakes);
 // flashes, popups, placed sounds) as events for guests; everything else guests read from the snapshot itself.
 // convoy: co-op / solo variant on its own map (sim.js MAPS.convoy): hunt escorted merchants sailing port to port.
 let convoy = false;
+// bossRun: the solo boss mode (bossfight.js) on the waves map: the twelve bosses one after another, refit cards in between, no navy, no fort
+let bossRun = false;
+// a boss's name on the banner and the hull bar. Proper names stay as they are; the others are translated where shown.
+const BOSS_NAME = {
+  trinidad: 'SANTÍSIMA TRINIDAD', atocha: 'NUESTRA SEÑORA DE ATOCHA', galley: tk('BARBAROSSA'), turtle: 'YI SUN-SIN', blackbeard: tk('BLACKBEARD'), junk: 'CHING SHIH',
+  dutchman: tk('THE FLYING DUTCHMAN'), serpent: 'JÖRMUNGANDR', whale: 'MOBY DICK', charybdis: tk('CHARYBDIS AND SCYLLA'), island: tk('ASPIDOCHELONE'), poseidon: tk('POSEIDON'),
+};
 const modeName = () => (mode === 'pvp' ? 'PVP' : convoy ? t('CONVOY') : t('CO-OP'));
 let net = 'solo', mode = 'coop', room = null, myPid = 0, roomOpen = false; // roomOpen: the host's room got its code
 // quick match: the server queue this room came from ('pvp' | 'coop-waves' | 'coop-convoy'), the host's countdown end, attempts so far
@@ -113,7 +122,7 @@ function addShip(type, livery, team, x, z, h, sail = 0, s = makeShip(type, team,
   s.sail = sail;
   s.id ??= nextId++;
   s.livery = livery;
-  s.mesh = buildShip(type, livery, s.cannons);
+  s.mesh = Object.hasOwn(BOSS, type) ? buildBoss(type) : buildShip(type, livery, s.cannons);
   s.seed = Math.random() * 10;
   s.wakeT = 0;
   scene.add(s.mesh.root);
@@ -163,7 +172,7 @@ function loadMap(name) {
   sea.setMap();
   buildForts();
 }
-const fortsOn = () => (convoy && state.wave > 0) || mode === 'pvp' || fortActive(state.wave); // convoy: not before the first convoy sails
+const fortsOn = () => !bossRun && ((convoy && state.wave > 0) || mode === 'pvp' || fortActive(state.wave)); // convoy: not before the first convoy sails
 function fortShow(fort, on) {
   for (const t of fort.turrets) t.mesh.visible = on;
   if (fort.flag) fort.flag.visible = on;
@@ -295,7 +304,7 @@ function castSkill(p, slot) {
 let paused = false;
 function openPause() {
   if (state.mode === 'select' || (net === 'guest' && guestShip === null)) return; // no run yet
-  if (state.mode === 'dead') return; // sunk: the end screen is 3 s away, and a paused world would never get there to sign the run
+  if (state.mode === 'dead' || state.mode === 'won') return; // sunk, or the last boss beaten: the end screen is 3 s away, and a paused world would never get there to sign the run
   held.clear(); // a key released under the overlay never sends keyup to the game
   if (net === 'solo') { paused = true; setPaused(true); }
   ui.open('pause', { online: net !== 'solo' });
@@ -376,9 +385,10 @@ function syncShip(s, t, dt) {
   const { root, body, flag } = s.mesh;
   root.position.set(s.x, 0, s.z);
   root.rotation.y = -s.h;
-  body.position.y = Math.sin(t * 1.4 + s.seed) * 0.12 - 0.05;
-  body.rotation.x = Math.sin(t * 1.1 + s.seed) * 0.035 - s.turnRate * s.speed * 0.02; // roll + heel into turns
-  body.rotation.z = Math.sin(t * 0.9 + s.seed * 2) * 0.025;
+  const sway = s.mesh.still ? 0 : 1; // a rock does not bob (bosses.js)
+  body.position.y = (Math.sin(t * 1.4 + s.seed) * 0.12 - 0.05) * sway;
+  body.rotation.x = (Math.sin(t * 1.1 + s.seed) * 0.035 - s.turnRate * s.speed * 0.02) * sway; // roll + heel into turns
+  body.rotation.z = Math.sin(t * 0.9 + s.seed * 2) * 0.025 * sway;
   if (!s.alive) {
     // list to one side, settle stern-first, then go under
     body.position.y -= s.sinkT * s.sinkT * 0.12;
@@ -387,9 +397,27 @@ function syncShip(s, t, dt) {
     if (Math.random() < 0.5) fx.bubble(s.x, s.z);
   }
   s.mesh.foam.visible = s.alive; // back on when a co-op pirate respawns
+  s.mesh.anim?.(t); // a boss model's own motion: oars, coils, the whirlpool
+  if (s.boss) {
+    // A dive is played, not switched: the model goes under nose first in DIVE_T, and bursts back up, nose high, in RISE_T.
+    // s.sub: 0 on the surface → 1 under. The sim has it untouchable from the first frame down to the frame it comes up (bossfight.js dive / under).
+    if (!!s.hidden !== !!s.wasHidden) {
+      s.wasHidden = s.hidden;
+      for (let i = 0; i < 6; i++) fx.splash(s.x + (Math.random() - 0.5) * s.len * 0.7, s.z + (Math.random() - 0.5) * s.len * 0.7);
+      sound('splash', s.x, s.z, 1.4);
+    }
+    s.sub = Math.max(0, Math.min(1, (s.sub ?? 0) + (s.hidden ? dt / DIVE_T : -dt / RISE_T)));
+    body.position.y -= s.sub * s.sub * DIVE_DEPTH;
+    body.rotation.z += Math.sin(Math.PI * s.sub) * (s.hidden ? -0.5 : 0.45);
+    if (s.sub > 0 && s.sub < 1 && Math.random() < 0.5) fx.splash(s.x + (Math.random() - 0.5) * s.len * 0.5, s.z + (Math.random() - 0.5) * s.len * 0.5); // the water boils where it goes through
+    // Spectral (the Dutchman): she thins out to nothing in FADE_OUT, and comes back in FADE_IN where she turns solid. s.gone: 0 there → 1 gone.
+    s.gone = Math.max(0, Math.min(1, (s.gone ?? 0) + (s.ghost && !s.hidden && s.alive ? dt / FADE_OUT : -dt / FADE_IN)));
+    s.mesh.fade?.(1 - s.gone);
+    root.visible = s.sub < 1 && s.gone < 1;
+  }
   // fire on the deck once below half hull, or while fire shot burns
   if (s.mesh.arms) s.mesh.arms.forEach((a, i) => (a.rotation.z = Math.sin(t * 1.8 + i * 1.3) * 0.3)); // kraken arms writhe
-  if ((s.burnT > 0 || (s.hp < s.maxHp * 0.5 && !s.mesh.arms)) && (s.alive || s.sinkT < 3) && Math.random() < (s.burnT > 0 ? 0.8 : 0.35 + 0.4 * (1 - s.hp / s.maxHp))) {
+  if ((s.burnT > 0 || (s.hp < s.maxHp * 0.5 && !s.mesh.arms && !(s.boss && !s.cannons))) && !s.hidden && !s.ghost && (s.alive || s.sinkT < 3) && Math.random() < (s.burnT > 0 ? 0.8 : 0.35 + 0.4 * (1 - s.hp / s.maxHp))) {
     _v.set((Math.random() - 0.5) * s.len * 0.7, 1.8, (Math.random() - 0.5) * s.beam * 0.6);
     body.localToWorld(_v);
     fx.burn(_v.x, _v.y, _v.z);
@@ -504,6 +532,11 @@ function startWave(k) {
   state.nextAt = convoy ? 2 : 0; // convoy: escorts leave port between two merchants
   state.escorts = state.port = 0;
   sfx.bell();
+  if (bossRun) { // one boss per wave, stronger the later it comes (bossfight.js SCALE)
+    state.queue = []; state.merchants = []; state.krakenAt = Infinity;
+    state.order ??= dev ? [dev.id, ...bossOrder().filter((id) => id !== dev.id)] : bossOrder();
+    return spawnBoss(state.order[k - 1], k === 1 && dev ? dev.lvl : k);
+  }
   state.queue = waveSpec(k, Math.random, 1 + 0.6 * (players.length - 1), convoy ? state.delivered / 60 : 0); // ships join one at a time (flow), never the whole wave at once
   state.merchants = convoy ? convoySpec(k).map((m, i) => ({ ...m, at: i * 4 })) : merchantSpec(k).map((m, i) => ({ ...m, at: 5 + i * 15 }));
   state.convoyN = state.merchants.length;
@@ -512,6 +545,47 @@ function startWave(k) {
   for (const f of forts) if (!f.alive && k >= f.backAt) { fortUp(f); rebuilt = true; }
   const [from, to] = route();
   banner(convoy ? [tk('CONVOY {0} · {1} → {2}'), k, from.name, to.name] : [rebuilt ? tk('WAVE {0} · THE FORT IS REBUILT') : fortActive(k) && k === 3 ? tk('WAVE {0} · THE FORT OPENS FIRE') : tk('WAVE {0}'), k]);
+}
+// --- boss mode -----------------------------------------------------------------
+const BOSSES_N = Object.keys(BOSS).length;
+const FADE_OUT = 1.4, FADE_IN = 0.7; // s for a spectral boss to vanish, and to be back
+const DIVE_T = 0.9, RISE_T = 0.55, DIVE_DEPTH = 10; // s to go under, s to come up, how deep the model sinks (the serpent's head stands 8 tall)
+// ?boss=serpent&lvl=6: a boss run that opens on that boss at that level (to try one without playing up to it)
+const dev = (() => { const q = new URLSearchParams(location.search), id = q.get('boss'); return id && Object.hasOwn(BOSS, id) ? { id, lvl: Math.max(1, Math.min(BOSSES_N, +q.get('lvl') || 1)) } : null; })();
+function spawnBoss(id, lvl) {
+  let [x, z] = spawnPoint(), P = nearestPlayer({ x, z }) || { x: 0, z: 0 }, h = Math.atan2(P.z - z, P.x - x);
+  if (BOSS[id].fixed) { // Scylla's rock stays where it rises: her whirlpool, behind her, needs open water too (bossfight.js PULL)
+    for (let i = 0; i < 40; i++) {
+      const wx = x - Math.cos(h) * 19, wz = z - Math.sin(h) * 19;
+      if (Math.abs(wx) < BOUNDS.x - 20 && Math.abs(wz) < BOUNDS.z - 20 && !ISLANDS.some((I) => Math.hypot(wx - I.x, wz - I.z) < I.r + 14 || Math.hypot(x - I.x, z - I.z) < I.r + 14)) break;
+      [x, z] = spawnPoint(); h = Math.random() * Math.PI * 2;
+    }
+  }
+  const b = state.boss = addShip(id, 'boss', 1, x, z, h, 0, makeBoss(id, lvl, x, z, h));
+  for (let i = 0; i < 4; i++) fx.splash(b.x + Math.random() * 8 - 4, b.z + Math.random() * 8 - 4);
+  sound('splash', b.x, b.z, 1.5);
+  banner([tk('BOSS {0} / {1} · {2}'), state.wave, BOSSES_N, t(BOSS_NAME[id])], 3);
+}
+// what the boss did this frame (bossfight.js bossStep), with the functions the navy, the fort and the skills already use
+function bossActs(s, out, tgt) {
+  if (out.fire && !(tgt.smokeT > 0)) fire(s, out.fire); // smoke screen: her gunners can't see you either
+  pending.push(...out.balls);
+  for (const sl of out.slams) { addSlam(sl); if (sl.head) s.mesh.bite?.(sl, s); } // head: one of the model's heads goes for it
+  if (out.cue) s.mesh.cue?.(...out.cue); // a gesture to act out
+  for (const k of out.kegs) dropKeg(k);
+  for (const a of out.spawn) {
+    const [x, z] = spawnPoint(), P = nearestPlayer({ x, z }), e = addShip(a.type, a.livery, 1, x, z, Math.atan2(P.z - z, P.x - x), 3);
+    if (a.guard) { const n = state.escorts++; Object.assign(e, { escort: 'guard', ward: s, station: (n % 2 ? -1 : 1) * (12 + 8 * (n >> 1)) }); } // sim.js guardSteer, as a convoy's escort
+  }
+  if (out.say) banner([out.say], 2);
+}
+// the boss is sunk: its ships sail off, its zones still in the air never land, its kegs are gone
+function bossSlain(b) {
+  for (const o of ships) if (o.team === 1 && o.alive) o.escaped = true;
+  for (let i = slams.length - 1; i >= 0; i--) if (slams[i].team) { scene.remove(slams[i].mesh); slams.splice(i, 1); }
+  for (let i = kegs.length - 1; i >= 0; i--) if (kegs[i].team === 1) { scene.remove(kegs[i].mesh); kegs.splice(i, 1); } // and its kegs: none left to blow under the crew during repairs
+  for (let i = 0; i < 8; i++) fx.splash(b.x + (Math.random() - 0.5) * b.len, b.z + (Math.random() - 0.5) * b.len);
+  sound('boom', b.x, b.z, 1, 0.5);
 }
 // a ship's six stats against the best of the three (1 = the top of its gauge)
 const shipStats = (s) => [
@@ -545,7 +619,7 @@ function hideSelect() {
 let guestShip = null;
 // solo and host: this browser's own ship (a guest's is built by the host and comes back in snapshots)
 function choosePlayer(i) {
-  if (net === 'solo') store.lastMode = convoy ? 'convoy' : 'waves'; // the menu's SET SAIL
+  if (net === 'solo') store.lastMode = bossRun ? 'boss' : convoy ? 'convoy' : 'waves'; // the menu's SET SAIL
   store.lastShip = SHIPS[i];
   me = makePirate(PREVIEW[i], 0, i, store.name);
   if (!ships.includes(me)) ships.push(me); // a host's previews wait outside the sim (hostGame)
@@ -615,12 +689,12 @@ function flow(dt) {
   quickFlow();
   if (mode === 'pvp') return pvpFlow(dt); // also while the host is still on ship select: guests are already duelling
   if (state.mode === 'select') return;
-  if (!players.some((p) => p.alive) && state.mode !== 'dead') {
+  if (!players.some((p) => p.alive) && state.mode !== 'dead' && state.mode !== 'won') {
     state.mode = 'dead';
     state.t = 0;
     for (const p of players) p.cards = [];
   }
-  if (state.mode === 'dead') return gameOver();
+  if (state.mode === 'dead' || state.mode === 'won') return gameOver(); // won: the last boss is sunk (boss mode)
   if (state.mode === 'fight' && state.queue.length && state.t >= state.nextAt) {
     if (convoy) spawnEscort(state.queue.shift());
     else {
@@ -632,8 +706,22 @@ function flow(dt) {
   while (state.mode === 'fight' && state.merchants[0]?.at <= state.t) spawnMerchant(state.merchants.shift());
   if (state.mode === 'fight' && state.t >= state.krakenAt) { state.krakenAt = Infinity; spawnKraken(); }
   // waves: the navy is sunk. convoy: no merchant left at sea (sunk, captured or in port), whatever is left of the escort
-  const cleared = convoy ? !state.merchants.length && !ships.some((o) => o.merchant && o.alive && !o.escaped)
+  const cleared = bossRun ? !state.boss?.alive : convoy ? !state.merchants.length && !ships.some((o) => o.merchant && o.alive && !o.escaped)
     : !state.queue.length && !ships.some((o) => o.team === 1 && o.alive);
+  if (state.mode === 'fight' && cleared && bossRun) {
+    bossSlain(state.boss);
+    if (state.wave === BOSSES_N) { // every boss is beaten: the run is won
+      state.mode = 'won';
+      state.t = 0;
+      const b = state.boss; // paid at once, not in barrels: the run is signed in 3 s, before anybody could haul them in
+      b.wrecked = true;
+      sound('sink', b.x, b.z);
+      pay(b.x, b.z, b.gold * comboKill(b.x, b.z));
+      banner([tk('THE SEAS ARE YOURS')], 4);
+      sfx.fanfare();
+      return;
+    }
+  }
   if (state.mode === 'fight' && cleared) {
     if (convoy) for (const o of ships) if (o.team === 1 && o.alive) o.escaped = true; // the escort's job is over: it sails off (removed like a merchant that got away)
     diveKraken(); // nothing slams the crew during repairs
@@ -647,7 +735,7 @@ function flow(dt) {
       p.repair = p.maxHp * 0.6; // patch up to 60% of the hull per break, a bit each frame
       p.crew = Math.min(p.maxCrew, p.crew + p.maxCrew * 0.3); // recruits between waves
     }
-    banner(convoy ? [state.port ? tk('{0} TAKEN · {1} MADE PORT · ESCORT REINFORCED') : tk('{0} TAKEN · {1} MADE PORT'), state.convoyN - state.port, state.port] : [tk('WAVE CLEARED · REPAIRS')], convoy ? 3 : 2);
+    banner(bossRun ? [tk('{0} IS BEATEN · REPAIRS'), t(BOSS_NAME[state.boss.boss])] : convoy ? [state.port ? tk('{0} TAKEN · {1} MADE PORT · ESCORT REINFORCED') : tk('{0} TAKEN · {1} MADE PORT'), state.convoyN - state.port, state.port] : [tk('WAVE CLEARED · REPAIRS')], convoy || bossRun ? 3 : 2);
     sfx.fanfare();
   }
   for (const p of players) {
@@ -734,6 +822,7 @@ function updateEnemies(dt) {
   for (const s of ships) {
     if (s.team !== 1 || !s.alive) continue;
     let tgt = nearestPlayer(s);
+    if (s.boss) { bossActs(s, bossStep(s, dt, { target: tgt, ships }), tgt); continue; }
     if (s.escort === 'guard') {
       // ward: kept until she's gone, then the merchant with the fewest guards (closest on a tie); station: the free side, further out per pair
       if (!(s.ward?.alive && !s.ward.escaped)) {
@@ -828,6 +917,8 @@ function slamMesh() { const m = buildTentacle(); m.rotation.y = Math.random() * 
 // a fort's mortar shell (sim.js fireMortar): a red circle on the water that fills as the shell comes, and the shell itself
 const mortarMat = new THREE.MeshBasicMaterial({ color: '#d8262b', transparent: true, opacity: 0.75, depthWrite: false });
 const mortarGeo = [new THREE.RingGeometry(MORTAR.r - 0.35, MORTAR.r, 24), new THREE.CircleGeometry(MORTAR.r, 24)].map((g) => g.rotateX(-Math.PI / 2));
+const BIG_ZONE = 8; // a zone this wide is a wall of water (Poseidon's tidal blow): the sea moves with it
+const waveGeo = new THREE.RingGeometry(0.985, 1, 64).rotateX(-Math.PI / 2); // radius 1: scaled to the wave's reach (addSlam)
 const shellGeo = new THREE.SphereGeometry(0.45, 6, 5), shellMat = new THREE.MeshBasicMaterial({ color: '#1c1a1f' });
 function mortarMesh() {
   const g = new THREE.Group(), [ring, fill, shell] = [new THREE.Mesh(mortarGeo[0], mortarMat), new THREE.Mesh(mortarGeo[1], mortarMat), new THREE.Mesh(shellGeo, shellMat)];
@@ -838,18 +929,35 @@ function mortarMesh() {
   return g;
 }
 function addSlam(sl) {
-  Object.assign(sl, { id: nextId++, mesh: sl.team ? mortarMesh() : slamMesh() });
+  Object.assign(sl, { id: nextId++, t0: sl.t, mesh: sl.team ? mortarMesh() : slamMesh() });
+  if (sl.team) sl.mesh.scale.setScalar(sl.r / MORTAR.r); // a boss's marked zone (bossfight.js): the mortar's circle at its own size
+  if (sl.wave) { // how far its shock wave reaches: a thin ring, in world units whatever the zone's own scale
+    const reach = new THREE.Mesh(waveGeo, mortarMat);
+    reach.scale.setScalar((sl.wave.r * MORTAR.r) / sl.r);
+    reach.position.y = 0.2;
+    sl.mesh.add(reach);
+  }
   slams.push(sl);
-  if (sl.team) sound('boom', sl.x, sl.z, 0.5); else sound('splash', sl.x, sl.z, 0.6);
+  if (sl.team && sl.from !== null) sound('boom', sl.x, sl.z, 0.5); else sound('splash', sl.x, sl.z, 0.6);
 }
 // telegraph: a ring of bubbles the size of the hit, the arm rises out of it, then whips down over the last quarter
 function drawSlam(sl) {
   if (sl.team) {
-    const k = Math.max(0, sl.t) / MORTAR.t, { fill, shell } = sl.mesh.userData;
-    const f = (sl.from ??= forts.reduce((a, b) => (Math.hypot(b.x - sl.x, b.z - sl.z) < Math.hypot(a.x - sl.x, a.z - sl.z) ? b : a))); // the nearest fort fired it (guests are not told which)
+    const k = Math.max(0, sl.t) / (sl.t0 ?? MORTAR.t), { fill, shell } = sl.mesh.userData; // t0: a guest's zone has none
+    if (sl.from === undefined) sl.from = forts.reduce((a, b) => (Math.hypot(b.x - sl.x, b.z - sl.z) < Math.hypot(a.x - sl.x, a.z - sl.z) ? b : a)); // the nearest fort fired it (guests are not told which)
+    const f = sl.from; // null: a bite, a breach, a bolt: nothing is lobbed
     sl.mesh.position.set(sl.x, 0, sl.z);
     fill.scale.setScalar(1 - k + 0.01);
-    shell.position.set((f.x - sl.x) * k, 7 * k + 110 * k * (1 - k), (f.z - sl.z) * k); // a high arc from the fort
+    shell.visible = !!f;
+    if (sl.r >= BIG_ZONE) { // a tidal blow gathering: foam drawn in from its rim, faster as it comes
+      for (let j = 0; j < 2; j++) if (Math.random() < 0.35 + 0.65 * (1 - k)) {
+        const a = Math.random() * 6.28, r = sl.r * (0.75 + Math.random() * 0.3), v = sl.r * 1.1;
+        wakes.spawn(sl.x + Math.cos(a) * r, sl.z + Math.sin(a) * r, 1.1, -Math.cos(a) * v, -Math.sin(a) * v, 0.9);
+      }
+    }
+    const sc = sl.mesh.scale.x; // the zone's size (addSlam): the shell, its child, is kept out of it
+    shell.scale.setScalar(1 / sc);
+    if (f) shell.position.set(((f.x - sl.x) * k) / sc, (7 * k + 110 * k * (1 - k)) / sc, ((f.z - sl.z) * k) / sc); // a high arc from the fort
     return;
   }
   const k = Math.max(0, sl.t) / SLAM.t; // 1 → 0
@@ -865,6 +973,15 @@ function updateSlams(dt) {
     if (!stepSlam(sl, dt, ships)) { drawSlam(sl); continue; }
     for (let j = 0; j < 3; j++) fx.splash(sl.x + Math.random() * 4 - 2, sl.z + Math.random() * 4 - 2);
     sound('boom', sl.x, sl.z, 0.8, 0.35);
+    const reach = sl.wave?.r ?? (sl.r >= BIG_ZONE ? sl.r : 0), r0 = sl.wave ? sl.r : 2.5;
+    if (reach) { // a shock wave, or a tidal blow breaking: a ring of foam racing out to its reach (the pool's drag eats 1.83 of the speed per unit run)
+      for (let j = 0; j < 48; j++) {
+        const a = (j / 48) * Math.PI * 2, v = (reach - r0) * 1.83;
+        for (const k of [1, 0.8, 0.55]) wakes.spawn(sl.x + Math.cos(a) * r0, sl.z + Math.sin(a) * r0, 1.5, Math.cos(a) * v * k, Math.sin(a) * v * k, 1.3);
+        if (!sl.wave && j % 4 === 0) fx.splash(sl.x + Math.cos(a) * reach * 0.8, sl.z + Math.sin(a) * reach * 0.8);
+      }
+      sound('boom', sl.x, sl.z, 1.2, 0.6);
+    }
     scene.remove(sl.mesh);
     slams.splice(i, 1);
   }
@@ -954,15 +1071,16 @@ function gameOver() {
   if (state.t > 3 && !over) { over = true; endRun(); }
 }
 function endRun() {
-  const m = convoy ? 'convoy' : 'waves';
+  const m = bossRun ? 'boss' : convoy ? 'convoy' : 'waves', won = state.mode === 'won';
   const crew = [...players].sort((a, b) => a.pid - b.pid).map((p) => ({ name: p.tag, ship: String(p.name).toLowerCase() })); // online: the whole crew signs, in seat order
-  const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: state.wave, gold: state.gold, combo: combo.best, at: Date.now() };
+  const board = boardOf(m, crew.length), entry = { mode: m, crew, wave: bossRun ? Math.max(0, state.wave - (state.boss?.alive ? 1 : 0)) : state.wave, gold: state.gold, combo: combo.best, at: Date.now() }; // boss mode: bosses beaten (state.wave names the one being fought, or the last one sunk)
   const local = signLocal(board, entry), dealt = { ...me?.dealt }; // a copy: a keg still afloat may add to the count after the screen is up
-  const res = { entry, board, name: me?.tag || store.name, online: net !== 'solo', dealt, best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
+  const res = { won, entry, board, name: me?.tag || store.name, online: net !== 'solo', dealt, best: local.rank === 0, local: local.rank, world: null, top: local.top, rank: local.rank };
   store.style = dealt; // added to this browser's running count (the menu's YOUR STYLE)
   held.clear();
   ui.open('gameover', res);
   if (local.rank === 0) sfx.fanfare();
+  if (bossRun) return; // this browser's board only: the world's (ice service) has none for this mode
   // sunk before wave 1 (a crew ramming each other): the service takes no such run, its board is only read
   worldScores(board, entry.wave > 0 && entry).then((r) => {
     const top = r.top.map(normRow).filter(Boolean); // a service from before names answers its old rows
@@ -1009,7 +1127,7 @@ function updateBalls(dt) {
     sound('boom', b.x, b.z);
     flying.push(b);
   }
-  const targets = [...ships, ...forts];
+  const targets = bossRun ? ships : [...ships, ...forts]; // boss mode has no fort: nothing to shell for gold
   for (let i = flying.length - 1; i >= 0; i--) {
     const b = flying[i];
     const ev = stepBall(b, dt, targets);
@@ -1107,8 +1225,11 @@ function hud() {
       (state.mode === 'pvp' ? `<br>${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` : ''));
   }
   $('gold').textContent = state.gold;
-  $('wave').textContent = state.wave;
-  $('wave-l').textContent = convoy ? t('CONVOY') : t('WAVE');
+  $('wave').textContent = bossRun ? `${state.wave} / ${BOSSES_N}` : state.wave;
+  $('wave-l').textContent = bossRun ? 'BOSS' : convoy ? t('CONVOY') : t('WAVE');
+  const B = bossRun && state.mode === 'fight' && state.boss?.alive && state.boss;
+  $('bossbar').hidden = !B;
+  if (B) { setHTML($('boss-n'), `${ui.esc(t(BOSS_NAME[B.boss]))} · ${t('LEVEL {0}', B.lvl)}`); $('boss-hp').style.width = (B.hp / B.maxHp) * 100 + '%'; }
   $('navy').hidden = !convoy;
   $('delivered').textContent = state.delivered;
   $('combo').hidden = combo.n < 2;
@@ -1118,7 +1239,7 @@ function hud() {
   camera.updateMatrixWorld();
   const W = canvas.clientWidth, H = canvas.clientHeight;
   for (const s of [...ships, ...forts]) {
-    if ((s === me && net === 'solo') || (s !== me && s.team === 0 && !s.isPlayer)) { if (s.bar) s.bar.hidden = true; continue; } // a crewmate who left: no frozen bar
+    if ((s === me && net === 'solo') || (s !== me && s.team === 0 && !s.isPlayer) || s.boss) { if (s.bar) s.bar.hidden = true; continue; } // a boss has its own bar, top of the screen // a crewmate who left: no frozen bar
     if (!s.bar) {
       s.bar = document.createElement('div');
       s.bar.className = s === me ? 'ebar self' : s.isPlayer ? (s.team === me.team ? 'ebar p' : 'ebar e') : s.merchant ? 'ebar m' : s.type === 'kraken' ? 'ebar k' : 'ebar';
@@ -1483,10 +1604,15 @@ function setConvoy(on) {
   if (convoy !== on) loadMap(on ? 'convoy' : 'waves');
   convoy = on;
 }
+// a solo run's mode: 'waves' | 'convoy' | 'boss' (store.js MODES)
+function setMode(m) {
+  setConvoy(m === 'convoy');
+  bossRun = m === 'boss';
+}
 // the lobby's mode (the host's choice; a guest applies the host's)
 function setLobbyMode(m) {
   mode = m === 'pvp' ? 'pvp' : 'coop';
-  setConvoy(m === 'convoy');
+  setMode(m === 'convoy' ? m : 'waves'); // no boss mode online
   if (!lobby || lobby.mode === m) return;
   lobby.mode = m;
   lobbySync();
@@ -1675,10 +1801,10 @@ initScreens({
   muteLabel: () => ui.keyLabel(keys.mute),
   testFx: () => sfx.boom(1, 0),
   pauseAudio: (on) => paused && setPaused(on), // settings opened from the pause: sound is back while it is open
-  setMode: (m) => setConvoy(m === 'convoy'), // its map shows behind the ship screen
+  setMode, // its map shows behind the ship screen
   // online: the hub's state, its three ways in, and the lobby
   hub: () => ({ off: typeof Peer === 'undefined', busy, err: codeErr }),
-  quick: quickGame, create: () => hostGame(store.lastMode), join: joinGame, leave: () => offline(),
+  quick: quickGame, create: () => hostGame(LOBBY_MODES.includes(store.lastMode) ? store.lastMode : 'waves'), join: joinGame, leave: () => offline(),
   lobby: () => lobby && { ...lobby, me: myPid, host: net === 'host' },
   lobbyMode: (m) => net === 'host' && !lobby.quick && !lobby.started && setLobbyMode(m),
   lobbyPick, lobbyReady, lobbyStart, thumb,
@@ -1691,7 +1817,7 @@ initScreens({
   pauseKeys: () => [ui.keyLabel(keys.pause), 'ESC'],
   isPause: (code) => actionAt(code) === 'pause',
 });
-function startSolo(m, i) { setConvoy(m === 'convoy'); ui.reset(); choosePlayer(i); }
+function startSolo(m, i) { setMode(m); ui.reset(); choosePlayer(i); }
 ui.setOnChange(() => { document.body.classList.toggle('menus', ui.active()); rekey(); }); // rekey: labels follow the keyboard layout once the browser tells it
 ui.setOnKey((e) => { if (actionFor(e) === 'mute') toggleMute(); }); // the mute key works on every screen
 setAudio(store.audio);
@@ -1699,7 +1825,8 @@ rekey();
 // broadside.boot: a reload asked for by the menus (a run starts from a fresh page) says where to land
 let boot = null;
 try { boot = sessionStorage.getItem('broadside.boot'); sessionStorage.removeItem('broadside.boot'); } catch {}
-if (!store.name || !boot) ui.open('title');
+if (dev && store.name && (!boot || boot === 'sail')) startSolo('boss', Math.max(0, SHIPS.indexOf(store.lastShip))); // ?boss=…: straight into that fight (and again on SAIL AGAIN); a reload the menus asked for still lands where they said
+else if (!store.name || !boot) ui.open('title');
 else if (boot === 'sail') startSolo(store.lastMode, SHIPS.indexOf(store.lastShip)); // SAIL AGAIN: same mode, same ship
 else if (boot === 'ship') ui.reset('menu', 'solo-mode', 'ship');
 else if (boot === 'online') ui.reset('menu', 'online');
@@ -1709,7 +1836,8 @@ updateCamera(0, true);
 window.__game = {
   ui, get player() { return me; }, players, ships, state, sfx, fire: (side) => fire(me, side), choose: choosePlayer, board: () => tryBoard(me), press: () => boardPress(), cast: (i) => castSkill(me, i), pick: (i) => choose(me, i), kegs, slams, spawnKraken, get forts() { return forts; }, setConvoy, combo, scores: () => store.best, zoom: () => (overview = !overview), camera,
   killWave: () => (state.queue = []) && ships.filter((o) => o.team === 1).forEach((o) => damage(o, 1e9)),
-  startWave,
+  startWave, setMode,
+  boss(id, lvl = 1) { if (state.boss?.alive) { bossSlain(state.boss); state.boss.escaped = true; } state.mode = 'fight'; state.t = 0; spawnBoss(id, lvl); }, // any boss, any level, now
   advance(sec) { for (let t = 0; t < sec; t += 1 / 60) step(1 / 60); post.render(scene, camera); },
   info: () => ({ iw, ih, calls: renderer.info.render.calls, tris: renderer.info.render.triangles }),
 };

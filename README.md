@@ -31,6 +31,7 @@ Peer-to-peer, no server to run. In **ONLINE**, one player clicks **CREATE ROOM**
 - **Quick match**: **CO-OP · WAVES**, **CO-OP · CONVOY** or **PVP** drops you into a room with strangers, no code to share. The first player in a queue hosts; as soon as someone joins, a 15 s countdown starts in the lobby (cut short when all 4 pirates are ready), then the game sets sail on its own. Friends can still join a quick room with its code.
 
 - **Convoy** (solo or co-op): its own long map between two ports, forts on the way. Each round a merchant convoy sails port to port with its escort: guards that stay beside the merchants, hunters that come for you. The round ends when every merchant is sunk, captured or in port. Gold that reaches port buys a bigger escort for the next convoys.
+- **Boss** (solo): the twelve bosses one after another on the waves map, with a refit card between two fights. The first eleven come in a random order, Poseidon always last; a boss is stronger the later it comes (`SCALE` in `bossfight.js`). Sink all twelve and the run is won. Its board is this browser's only. `?boss=serpent&lvl=6` opens a run on that boss at that level; `bosses.html` shows the twelve models.
 - **Co-op**: shared gold, bigger waves, each pirate picks their own refit cards; a sunk pirate comes back at the next break, the run ends when the whole crew is sunk.
 - **PvP**: first to 10 sinkings (or most after 5 min). Each sinking refits the winner; merchants keep coming as loot (their barrels patch your hull).
 - Online nothing stops and there is no boarding QTE: the pause screen opens but the sea goes on and your ship drifts, and only ships under 20% hull (striking their colours) can be boarded.
@@ -92,7 +93,7 @@ These are the defaults; every one can be changed in **SETTINGS › CONTROLS**. K
 
 - Three player ships, progressive waves, destructible fort, islands that block cannonballs
 - The fort's mortar: it outranges the fort's cannons. A red circle appears on the water where you will be if you hold your course, and the shell lands 2.5 s later: turn hard to dodge it
-- The kraken: a slow sea monster that roams the map in every mode (waves 4, 7, 10…, convoys 3, 6, 9…, PvP a minute in and a minute after each kill). It slams any ship that comes near, pirate, navy or merchant alike: a tentacle rises, then falls where you were heading 2.2 s later, so turn hard. It can be killed, but drops no loot, and neither do the ships it sinks; in PvP its sinkings score for nobody
+- The kraken: a slow sea monster that roams the map in waves, convoy and PvP (waves 4, 7, 10…, convoys 3, 6, 9…, PvP a minute in and a minute after each kill). It slams any ship that comes near, pirate, navy or merchant alike: a tentacle rises, then falls where you were heading 2.2 s later, so turn hard. It can be killed, but drops no loot, and neither do the ships it sinks; in PvP its sinkings score for nobody
 - Skill bar (4 slots, learn and level up between waves)
 - Merchant convoys, gold pickup with magnet, combo multiplier (×2 to ×5)
 - Boarding: automatic under 20% hull, otherwise a timing QTE; crew losses and recruits
