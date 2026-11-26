@@ -579,10 +579,11 @@ function bossActs(s, out, tgt) {
   }
   if (out.say) banner([out.say], 2);
 }
-// the boss is sunk: its ships sail off, its zones still in the air never land
+// the boss is sunk: its ships sail off, its zones still in the air never land, its kegs are gone
 function bossSlain(b) {
   for (const o of ships) if (o.team === 1 && o.alive) o.escaped = true;
   for (let i = slams.length - 1; i >= 0; i--) if (slams[i].team) { scene.remove(slams[i].mesh); slams.splice(i, 1); }
+  for (let i = kegs.length - 1; i >= 0; i--) if (kegs[i].team === 1) { scene.remove(kegs[i].mesh); kegs.splice(i, 1); } // and its kegs: none left to blow under the crew during repairs
   for (let i = 0; i < 8; i++) fx.splash(b.x + (Math.random() - 0.5) * b.len, b.z + (Math.random() - 0.5) * b.len);
   sound('boom', b.x, b.z, 1, 0.5);
 }
@@ -712,6 +713,10 @@ function flow(dt) {
     if (state.wave === BOSSES_N) { // every boss is beaten: the run is won
       state.mode = 'won';
       state.t = 0;
+      const b = state.boss; // paid at once, not in barrels: the run is signed in 3 s, before anybody could haul them in
+      b.wrecked = true;
+      sound('sink', b.x, b.z);
+      pay(b.x, b.z, b.gold * comboKill(b.x, b.z));
       banner([tk('THE SEAS ARE YOURS')], 4);
       sfx.fanfare();
       return;
@@ -1122,7 +1127,7 @@ function updateBalls(dt) {
     sound('boom', b.x, b.z);
     flying.push(b);
   }
-  const targets = [...ships, ...forts];
+  const targets = bossRun ? ships : [...ships, ...forts]; // boss mode has no fort: nothing to shell for gold
   for (let i = flying.length - 1; i >= 0; i--) {
     const b = flying[i];
     const ev = stepBall(b, dt, targets);

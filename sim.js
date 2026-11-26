@@ -104,7 +104,7 @@ export function stepShip(s, dt) {
   for (const k of ['slowT', 'armorT', 'boostT', 'smokeT']) s[k] = Math.max(0, s[k] - dt);
   for (const id in s.cd) s.cd[id] = Math.max(0, s.cd[id] - dt);
   s.boardCd = Math.max(0, s.boardCd - dt);
-  if (s.burnT > 0) { s.burnT = Math.max(0, s.burnT - dt); damage(s, BURN_DPS * dt, s.burnBy, 'gun'); } // the burn counts for whoever lit it, as her guns' work
+  if (s.burnT > 0) { s.burnT = Math.max(0, s.burnT - dt); if (!s.ghost) damage(s, BURN_DPS * dt, s.burnBy, 'gun'); } // the burn counts for whoever lit it, as her guns' work. A ghost does not burn: it would sink unseen
   const slow = s.slowT > 0, boost = s.boostT > 0;
   const target = SAIL_LEVELS[s.sail] * s.maxSpeed * (slow ? 0.45 : 1) * (boost ? 1.7 : s.noWind ? 1 : windMul(s.h)); // Full sail (oars out) and the kraken ignore the wind
   const acc = boost ? 5 : target > s.speed ? 1.6 : 2.6; // sails take a while to fill, drag bites faster

@@ -61,6 +61,10 @@ function under(s, dt, tgt, out) { // true while it is down
   if (!u.at && u.left <= (u.warn = typeof u.warn === 'function' ? u.warn(tgt) : u.warn)) {
     const p = lead(tgt, u.left), lx = BOUNDS.x - 12, lz = BOUNDS.z - 12;
     u.at = { x: Math.max(-lx, Math.min(lx, p.x)), z: Math.max(-lz, Math.min(lz, p.z)) };
+    for (const I of ISLANDS) { // a prey heading at a shore: the mark is pushed off the island, onto the water it will reach first
+      const dx = u.at.x - I.x, dz = u.at.z - I.z, d = Math.hypot(dx, dz) || 1e-3, lim = I.r * 1.2 + u.r + 2;
+      if (d < lim) { u.at.x = I.x + (dx / d) * lim; u.at.z = I.z + (dz / d) * lim; }
+    }
     out.slams.push(zone(s, u.at.x, u.at.z, { ...u, t: u.left }));
   }
   if (u.left > 0) return true;
@@ -87,16 +91,17 @@ export const BOSS = {
     },
   },
   // Nuestra Señora de Atocha: runs from corner to corner of the chart behind her escort, and shoots back when stung.
-  // She never leaves it (the run needs her sunk): each corner she reaches, one more brig joins.
+  // She never leaves it (the run needs her sunk): each corner she reaches, one more brig joins, up to four afloat.
   atocha: {
     len: 17, beam: 5.8, hp: 420, speed: 7, turn: 0.55, cannons: 5, dmgMul: 1, range: 30, reloadTime: 5, aimTol: 0.12, gold: 400,
-    step(s, dt, tgt, out) {
+    init: (s) => { s.calm = 99; }, // not hit yet (sim.js damage zeroes it), like a merchant
+    step(s, dt, tgt, out, ctx) {
       s.calm += dt;
       if (!s.dest || dist(s, s.dest) < 14) {
-        const first = !s.dest, n = first ? 2 + s.adds : (s.guards < 4 + s.adds ? 1 : 0);
+        const afloat = ctx.ships.filter((o) => o.ward === s && o.alive && !o.escaped).length; // game.js makes her the ward of the brigs she calls
+        const first = !s.dest, n = first ? 2 + s.adds : (afloat < 4 + s.adds ? 1 : 0);
         const corners = [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([a, b]) => ({ x: a * (BOUNDS.x - 28), z: b * (BOUNDS.z - 28) }));
         s.dest = corners.filter((c) => dist(s, c) > 40).sort((a, b) => dist(tgt, b) - dist(tgt, a))[0]; // the one furthest from the pirate
-        s.guards = (s.guards || 0) + n;
         ships(out, n, 'brig', 'navy', true);
         if (!first && n) out.say = tk('THE ESCORT IS REINFORCED');
       }
@@ -160,12 +165,14 @@ export const BOSS = {
       }
       s.sail = 3;
       head(s, bearingTo(s, tgt));
-      if (!ready(s, 'phase', 9)) return;
-      s.ghost = false;
-      for (const k of [1, -1]) { // abeam of her prey, sailing the same course: her broadside bears at once
-        const x = tgt.x - Math.sin(tgt.h) * 24 * k, z = tgt.z + Math.cos(tgt.h) * 24 * k;
-        if (open(x, z, 10)) { Object.assign(s, { x, z, h: tgt.h, speed: tgt.speed }); break; }
-      }
+      if (s.tm.phase > 0) return;
+      // Back solid 24 off her prey, sailing the same course: abeam if there is open water there (her broadside bears at once),
+      // else astern or ahead. No room at all (a pirate wedged between a shore and the chart's edge): she stays spectral and
+      // tries again a moment later, rather than turn solid where she is, which may be inside the pirate's hull.
+      const at = [Math.PI / 2, -Math.PI / 2, Math.PI, 0].map((a) => ({ x: tgt.x + Math.cos(tgt.h + a) * 24, z: tgt.z + Math.sin(tgt.h + a) * 24 })).find((p) => open(p.x, p.z, 10));
+      if (!at) { s.tm.phase = 0.5; return; }
+      Object.assign(s, { ...at, h: tgt.h, speed: tgt.speed, ghost: false });
+      s.tm.phase = 9 * s.pace;
       s.reload.port = s.reload.star = 0.8;
     },
   },

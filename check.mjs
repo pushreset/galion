@@ -634,6 +634,54 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
     s.hp = s.maxHp * 0.4; s.tm.trident = 0;
     assert.equal(new Set(bossStep(s, DT, { target: p, ships: [s, p], rand }).slams.map((z) => Math.round(Math.atan2(z.z, z.x) * 1e6))).size, TRIDENT.bolts + 1, 'hurt, a fifth bolt');
   }
+  // Atocha: holds her fire until she is hit, then shoots at whoever crosses her beam
+  {
+    const s = makeBoss('atocha', 1, 0, 0, 0), p = makePlayer(2, 0, 20, 0), ctx = { target: p, ships: [s, p] }, fires = () => { let n = 0; for (let t = 0; t < 7; t += DT) n += bossStep(s, DT, ctx).fire ? 1 : 0; return n; };
+    Object.assign(s, { dest: { x: 90, z: 0 } }); // already under way, due east, the pirate abeam at 20
+    assert.equal(fires(), 0, 'Atocha should not fire on a pirate who never touched her');
+    damage(s, 1);
+    assert.ok(fires() > 0, 'stung, she shoots back');
+  }
+  // Atocha's escort: one more brig at each corner while fewer than four are afloat, whatever she called before
+  {
+    const s = makeBoss('atocha', 1, 0, 0, 0), p = makePlayer(2, -60, 0, 0), brigs = [];
+    const corner = () => { s.x = s.dest.x; s.z = s.dest.z; const n = bossStep(s, DT, { target: p, ships: [s, p, ...brigs] }).spawn.length; for (let i = 0; i < n; i++) brigs.push(Object.assign(makeShip('brig', 1), { ward: s })); return n; };
+    s.dest = { x: 0, z: 0 };
+    assert.deepEqual([corner(), corner(), corner(), corner()], [1, 1, 1, 1].map((n, i) => (i < 4 ? n : 0)));
+    assert.equal(corner(), 0, 'four afloat: no more');
+    for (const b of brigs) b.alive = false;
+    assert.equal(corner(), 1, 'her brigs sunk, she calls another at the next corner');
+  }
+  // a ghost does not burn: a boss under water or spectral cannot be sunk unseen by a fire shot
+  {
+    const g = Object.assign(makeBoss('whale'), { ghost: true, hidden: true, burnT: 3, hp: 1 });
+    stepShip(g, 1);
+    assert.ok(g.alive && g.hp === 1 && g.burnT === 2, 'the burn waits while nothing can touch it');
+    g.ghost = false;
+    stepShip(g, 1);
+    assert.ok(!g.alive, 'and bites again once it is back');
+  }
+  // a dive's mark never lands on an island, even with the prey heading straight at one
+  for (const id of ['serpent', 'whale']) for (const I of ISLANDS) for (const a of [0, 1.3, 2.6, 3.9, 5.2]) {
+    const p = makePlayer(1, I.x + Math.cos(a) * (I.r + 30), I.z + Math.sin(a) * (I.r + 30), a + Math.PI), b = makeBoss(id, 1, p.x + 20, p.z, 0), ctx = { target: p, ships: [p, b] };
+    p.sail = 3; p.speed = p.maxSpeed; b.tm.dive = 0; b.tm.bite = b.tm.charge = 99;
+    let sl;
+    for (let t = 0; t < 5 && !sl; t += DT) sl = bossStep(b, DT, ctx).slams[0];
+    assert.ok(sl && Math.hypot(sl.x - I.x, sl.z - I.z) > shoreR(I, Math.atan2(sl.z - I.z, sl.x - I.x)) + sl.r, `${id}'s mark fell on an island`);
+  }
+  // the Dutchman never turns solid on top of her prey: no open water 24 off it, she stays spectral
+  {
+    const wedged = makePlayer(2, 0, BOUNDS.z - 4, 0), s = Object.assign(makeBoss('dutchman', 1, 0, BOUNDS.z - 6, 0), { ghost: true }), ctx = { target: wedged, ships: [s, wedged] };
+    ISLANDS.length = 0;
+    ISLANDS.push({ x: 0, z: BOUNDS.z - 30, r: 14, ph: 0 }, { x: 30, z: BOUNDS.z - 8, r: 10, ph: 0 }, { x: -30, z: BOUNDS.z - 8, r: 10, ph: 0 }); // shore to the south, east and west; the chart's edge to the north
+    s.tm.phase = 0;
+    for (let t = 0; t < 3; t += DT) bossStep(s, DT, ctx);
+    assert.ok(s.ghost, 'no room: she stays spectral');
+    ISLANDS.length = 0;
+    for (let t = 0; t < 1; t += DT) bossStep(s, DT, ctx);
+    assert.ok(!s.ghost && Math.abs(Math.hypot(s.x - wedged.x, s.z - wedged.z) - 24) < 1e-6, 'open water again: solid, 24 off her prey');
+    setMap('waves');
+  }
   // reinforcements: once at each threshold, more of them at a higher level
   {
     const call = (id, lvl, fr) => { const b = makeBoss(id, lvl, 40, 0, 0), p = makePlayer(0), n = []; for (const f of fr) { b.hp = b.maxHp * f; n.push(bossStep(b, DT, { target: p, ships: [p, b] }).spawn.length, bossStep(b, DT, { target: p, ships: [p, b] }).spawn.length); } return n; };
