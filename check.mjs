@@ -1,7 +1,8 @@
 // node check.mjs — asserts on the pure sim, and on what the menus store.
 import assert from 'node:assert/strict';
 import { styleOf } from './store.js';
-import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, fireMortar, MORTAR, waveSpec, UPGRADES, SKILLS, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul } from './sim.js';
+import { BOSS, SCALE, PULL, BREACH, BITE, TRIDENT, bossOrder, makeBoss, bossStep } from './bossfight.js';
+import { setMap, MAPS, BOUNDS, convoySpec, guardSteer, makeShip, stepShip, fireBroadside, stepBall, collideShips, damage, ISLANDS, shoreR, aiSteer, makeTurret, fireTurret, fireMortar, MORTAR, waveSpec, UPGRADES, SKILLS, applyUpgrade, makePlayer, regenShip, REGEN_DELAY, useSkill, stepKeg, rollUpgrades, PLAYER_SHIPS, makeFort, merchantSpec, makeMerchant, merchantSteer, crewMul, canBoard, startBoarding, boardRound, captureReward, krakenSteer, stepSlam, krakenDue, WIND, windMul, SHELL } from './sim.js';
 
 WIND.k = 0; // the checks below are written for still air; the wind block turns it back on
 
@@ -467,6 +468,190 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   assert.equal(joined.length, MAX_PLAYERS - 1, 'overlapping joins passed the player cap');
 }
 
+// --- boss mode (bossfight.js) ---------------------------------------------------
+{
+  setMap('waves');
+  const ids = Object.keys(BOSS), DT = 1 / 30;
+  const seeded = (n) => () => ((n = (n * 1103515245 + 12345) % 2147483648) / 2147483648);
+  // the run: all twelve once, Poseidon last, the rest in the order drawn
+  const order = bossOrder(seeded(1));
+  assert.equal(order.length, 12);
+  assert.deepEqual([...order].sort(), [...ids].sort(), 'every boss is met exactly once');
+  assert.equal(order[11], 'poseidon', 'Poseidon comes last');
+  assert.notDeepEqual(order, bossOrder(seeded(2)), 'another draw, another order');
+  // the later a boss is met, the stronger it is
+  for (const id of ids) for (let l = 2; l <= 12; l++) {
+    const a = makeBoss(id, l - 1), b = makeBoss(id, l);
+    assert.ok(b.maxHp > a.maxHp && b.hp === b.maxHp && b.pow > a.pow && b.pace <= a.pace && b.adds >= a.adds && b.dmgMul > a.dmgMul, `${id} should be stronger at level ${l}`);
+  }
+  assert.equal(makeBoss('whale', 11).maxHp, Math.round(600 * (1 + SCALE.hp * 10)));
+  assert.equal(canBoard(Object.assign(makePlayer(0), { x: 1 }), makeBoss('junk')), false, 'a boss is not boarded');
+
+  // a whole fight, the way game.js runs it: the boss's effects become balls, zones, kegs and ships
+  function fight(id, lvl, secs, pilot, at = [40, 10, Math.PI]) {
+    const rand = seeded(7), p = makePlayer(2), b = makeBoss(id, lvl, ...at), all = [p, b], balls = [], slams = [], kegs = [], seen = { spawn: [], say: [], slams: 0, balls: 0, kegs: 0, ghost: 0 };
+    p.sail = 2;
+    for (let t = 0; t < secs; t += DT) {
+      pilot?.(p, b, t);
+      const out = bossStep(b, DT, { target: p, ships: all, rand });
+      if (out.fire) balls.push(...fireBroadside(b, out.fire, rand));
+      balls.push(...out.balls); slams.push(...out.slams); kegs.push(...out.kegs);
+      seen.spawn.push(...out.spawn); seen.slams += out.slams.length; seen.kegs += out.kegs.length; seen.ghost += b.ghost ? DT : 0;
+      if (out.say) seen.say.push(out.say);
+      for (const s of all) stepShip(s, DT);
+      collideShips(all);
+      for (let i = balls.length - 1; i >= 0; i--) { const q = balls[i]; if ((q.delay -= DT) > 0) continue; seen.balls++; if (stepBall(q, DT, all)) balls.splice(i, 1); else seen.balls--; }
+      for (let i = slams.length - 1; i >= 0; i--) if (stepSlam(slams[i], DT, all)) slams.splice(i, 1);
+      for (let i = kegs.length - 1; i >= 0; i--) if (stepKeg(kegs[i], DT, all)) kegs.splice(i, 1);
+      for (const s of all) assert.ok([s.x, s.z, s.h, s.hp, s.speed].every(Number.isFinite), `${id}: a number went bad at ${t.toFixed(1)} s`);
+      assert.ok(Math.abs(b.x) <= BOUNDS.x && Math.abs(b.z) <= BOUNDS.z, `${id} left the chart`);
+    }
+    return { p, b, seen };
+  }
+  // every boss, first and last level: 90 s against a Leviathan sailing a lazy circle. Nothing breaks, and it hurts her.
+  // (Atocha runs instead; Aspidochelone has to be woken.)
+  for (const id of ids) for (const lvl of [1, 12]) {
+    const { p, b, seen } = fight(id, lvl, 90, (p, b, t) => { p.turnIn = 0.3; if (id === 'island' && t === 0) damage(b, 1); });
+    if (id === 'atocha') assert.ok(seen.spawn.length >= 2 + b.adds && seen.spawn.every((s) => s.guard && s.type === 'brig') && b.dest, 'Atocha sails with an escort');
+    else assert.ok(p.hp < p.maxHp, `${id} level ${lvl} never hurt the pirate`);
+  }
+
+  // the serpent's rise, a marked zone bigger than the mortar's: still cleared by a hard turn 0.3 s in, not by holding course
+  for (const id of ['serpent']) for (const i of [0, 1, 2]) for (const turn of [0, 1]) {
+    const p = makePlayer(i, 30, 0, 0), b = makeBoss(id, 12, 0, 40, 0);
+    p.sail = 3; p.speed = p.maxSpeed;
+    b.tm.dive = 0; b.tm.bite = b.tm.charge = 99;
+    bossStep(b, 0, { target: p, ships: [p, b] }); // it dives; the frame after, the zone is marked
+    const [sl] = bossStep(b, 0, { target: p, ships: [p, b] }).slams, t0 = sl.t;
+    assert.ok(b.ghost && b.hidden, `${id} should be under water`);
+    while (sl.t > 0) {
+      if (sl.t <= t0 - 0.3) p.turnIn = turn;
+      stepShip(p, 1 / 60);
+      bossStep(b, 1 / 60, { target: p, ships: [p, b] });
+      stepSlam(sl, 1 / 60, [p, b]);
+    }
+    assert.equal(p.hp < p.maxHp, !turn, `${PLAYER_SHIPS[i].name} ${turn ? 'turning hard should dodge' : 'holding course should be hit by'} ${id}'s breach`);
+    assert.ok(!b.ghost && !b.hidden && Math.hypot(b.x - sl.x, b.z - sl.z) < 1e-6, `${id} should come up where it struck`);
+  }
+
+  // Moby Dick's breach: under water first with nothing on the water, then a late mark under the bow. A hard turn within a third of
+  // a second clears the blow in every player ship, a slow one does not; the wave still reaches whoever dodged, weaker with distance.
+  for (const i of [0, 1, 2]) for (const react of [0.3, 0.5, Infinity]) {
+    const p = makePlayer(i, 30, 0, 0), b = makeBoss('whale', 1, 0, 40, 0), ctx = { target: p, ships: [p, b] };
+    p.sail = 3; p.speed = p.maxSpeed;
+    b.tm.dive = 0; b.tm.charge = 99;
+    let sl, quiet = 0, warned = 0;
+    for (let t = 0; t < 8; t += 1 / 60) {
+      sl ??= bossStep(b, 1 / 60, ctx).slams[0];
+      if (!sl) { quiet += 1 / 60; assert.ok(b.ghost && b.hidden, 'the whale should be under water before the mark shows'); stepShip(p, 1 / 60); continue; }
+      if ((warned += 1 / 60) >= react) p.turnIn = 1;
+      stepShip(p, 1 / 60);
+      if (stepSlam(sl, 1 / 60, [p, b])) break;
+      bossStep(b, 1 / 60, ctx);
+    }
+    const name = PLAYER_SHIPS[i].name, lost = p.maxHp - p.hp, d = Math.hypot(p.x - sl.x, p.z - sl.z);
+    assert.ok(quiet > 0.8 && Math.abs(warned - BREACH.warn(p)) < 0.05 && Math.abs(quiet + warned - BREACH.down) < 0.05, `${name}: the mark should show late, ${BREACH.warn(p).toFixed(2)} s before the breach`);
+    assert.ok(sl.from === null, 'nothing is lobbed at a breach: no shell for game.js to draw');
+    if (react === 0.3) assert.ok(lost > 0 && lost < BREACH.wave.dmg && Math.abs(lost - BREACH.wave.dmg * (1 - d / BREACH.wave.r)) < 1e-6, `${name} turning at once should take the wave only, by her distance: ${lost.toFixed(1)}`);
+    else assert.ok(lost > BREACH.dmg, `${name} ${react === 0.5 ? 'turning late' : 'holding course'} should take the breach: ${lost.toFixed(1)}`);
+  }
+  // the wave alone: weaker the further off, nothing past its reach, the whale's own side spared
+  {
+    const at = (d, team = 0) => { const s = makeShip('brig', team, d, 0, 0); stepSlam({ x: 0, z: 0, t: 0, r: 3, dmg: 30, team: 1, wave: { r: 16, dmg: 18 } }, 0.1, [s]); return s.maxHp - s.hp; };
+    assert.ok(at(0) === 48 && Math.abs(at(8) - 9) < 1e-9 && Math.abs(at(12) - 4.5) < 1e-9 && at(16) === 0 && at(20) === 0 && at(8, 1) === 0, 'shock wave falloff');
+  }
+
+  // shell (Yi Sun-sin): a ball on her flank is mostly stopped, one in her stern third is not
+  {
+    const hit = (x) => { const b = makeBoss('turtle'), ball = { x, y: 1, z: 0, vx: 0, vy: 0, vz: 0, team: 0, dmg: 10, x0: 50, z0: 50 }; stepBall(ball, 0.001, [b]); return b.maxHp - b.hp; };
+    assert.ok(Math.abs(hit(3) - 10 * SHELL) < 1e-9 && Math.abs(hit(0) - 10 * SHELL) < 1e-9, 'the shell stops a ball forward of the stern');
+    assert.ok(Math.abs(hit(-4) - 10) < 1e-9, 'her stern is soft');
+  }
+  // ghost (the Dutchman spectral, anything under water): balls, zones, kegs and hulls pass through, islands do not stop her
+  {
+    const g = Object.assign(makeBoss('dutchman', 1, 0, 0, 0), { ghost: true }), p = makePlayer(1, 1, 0, 0);
+    assert.equal(stepBall({ x: 0, y: 1, z: 0, vx: 0, vy: 0, vz: 0, team: 0, dmg: 10, x0: 50, z0: 50 }, 0.001, [g]), null, 'a ball passes through a ghost');
+    stepSlam({ x: 0, z: 0, t: 0, r: 5, dmg: 10, team: 3 }, 0.1, [g]);
+    assert.equal(stepKeg({ x: 0, z: 0, team: 0, r: 6, dmg: 25, life: 5 }, 0.1, [g]), null, 'a keg does not see a ghost');
+    assert.equal(collideShips([g, p]).length, 0);
+    assert.ok(g.hp === g.maxHp && g.x === 0 && p.x === 1, 'nothing touches a ghost');
+    const I = ISLANDS[0];
+    Object.assign(g, { x: I.x + 1, z: I.z });
+    stepShip(g, 0.01);
+    assert.ok(Math.hypot(g.x - I.x, g.z - I.z) < 2, 'a ghost sails through an island');
+    g.ghost = false;
+    stepShip(g, 0.01);
+    assert.ok(Math.hypot(g.x - I.x, g.z - I.z) > I.r * 0.8, 'solid again, the shore pushes her out');
+  }
+  // the Dutchman: solid, spectral, solid again on the pirate's beam and clear of every island
+  {
+    const { b, seen } = fight('dutchman', 1, 40, (p) => { p.turnIn = 0.3; p.hp = p.maxHp; }); // kept afloat: a sunk pirate ends the fight
+    assert.ok(seen.ghost > 8 && seen.ghost < 20 && seen.say.includes('SHE FADES'), 'she should spend part of the fight spectral: ' + seen.ghost.toFixed(1));
+    assert.ok(!ISLANDS.some((I) => Math.hypot(b.x - I.x, b.z - I.z) < I.r), 'she must not end up inside an island');
+  }
+  // fixed (Scylla's rock): the hull that runs into it takes the whole push
+  {
+    const s = makeBoss('charybdis', 1, 0, 0, 0), p = makePlayer(0, 4, 0, Math.PI);
+    collideShips([s, p]);
+    assert.ok(s.x === 0 && s.z === 0 && Math.abs(p.x - (s.len + p.len) * 0.32) < 1e-9, 'the rock does not move, the ship is pushed clear');
+  }
+  // Charybdis: a ship adrift near the whirlpool is dragged into it; every player ship under full sail gets out from the rim of the maw
+  {
+    ISLANDS.length = 0; // open water: a ship holding one course must not run aground on the way out
+    const s = makeBoss('charybdis', 1, 0, 0, 0), cx = -PULL.d, adrift = makePlayer(0, cx + 25, 0, 0);
+    const d0 = Math.abs(adrift.x - cx);
+    for (let t = 0; t < 20; t += DT) { bossStep(s, DT, { target: adrift, ships: [s, adrift] }); stepShip(adrift, DT); }
+    assert.ok(Math.hypot(adrift.x - cx, adrift.z) < d0 - 10, 'a ship adrift should be pulled in');
+    for (const i of [0, 1, 2]) {
+      const p = makePlayer(i, cx, -(PULL.maw + 2), -Math.PI / 2); // just outside the maw, bow pointing away from it
+      p.sail = 3; p.speed = p.maxSpeed * 0.7; // she came in under sail
+      for (let t = 0; t < 30; t += DT) { bossStep(s, DT, { target: p, ships: [s, p] }); stepShip(p, DT); p.hp = p.maxHp; } // the pull alone: Scylla's bites are another matter
+      assert.ok(Math.hypot(p.x - cx, p.z) > PULL.r, `${PLAYER_SHIPS[i].name} under full sail should escape the whirlpool`);
+    }
+    setMap('waves');
+  }
+  // Scylla: a head lunges at a ship close by; one standing off, even past any gun's range, is spat at (a lobbed shot, from her)
+  {
+    const first = (d) => { const s = makeBoss('charybdis', 1, 0, 0, 0), p = makePlayer(2, d, 0, Math.PI / 2); return bossStep(s, DT, { target: p, ships: [s, p] }).slams; };
+    const bites = first(BITE.r - 4), spits = first(40), reach = Math.max(...PLAYER_SHIPS.map((p) => p.stats.range)), [bite] = bites, [spit] = spits;
+    assert.ok(bites.length === BITE.heads && bites.every((z) => z.head && z.from === null && z.dmg === BITE.dmg && z.t === bite.t), 'close by, all six heads bite, together');
+    assert.ok(spits.length === BITE.heads && spits.every((z) => z.head && z.from && z.dmg === BITE.spit) && spit.dmg < bite.dmg, 'further off, all six spit');
+    assert.ok(Math.hypot(bite.x - (BITE.r - 4), bite.z) < 0.5 && bites.slice(1).every((z) => { const r = Math.hypot(z.x - bite.x, z.z - bite.z); return r >= BITE.scatter[0] && r <= BITE.scatter[1]; }), 'one where she is, five round it');
+    assert.ok(makeBoss('charybdis').range > reach + 8 && !first(makeBoss('charybdis').range + 2).length, 'her reach beats every pirate gun, and ends');
+  }
+  // Poseidon's trident: a fan of bolts of uneven lengths, one of them through where the pirate is headed, the rows a lane apart
+  {
+    const s = makeBoss('poseidon', 1, 0, 0, 0), p = makePlayer(2, 30, 0, Math.PI / 2), rand = seeded(3);
+    s.tm.trident = 0; s.tm.tide = 99;
+    const zs = bossStep(s, DT, { target: p, ships: [s, p], rand }).slams, rows = new Map();
+    for (const z of zs) { const a = Math.round(Math.atan2(z.z, z.x) * 1e6); rows.set(a, [...(rows.get(a) || []), Math.hypot(z.x, z.z)]); }
+    const angles = [...rows.keys()].sort((a, b) => a - b).map((a) => a / 1e6), lens = [...rows.values()].map((r) => Math.max(...r));
+    assert.equal(rows.size, TRIDENT.bolts, 'four bolts');
+    assert.ok(new Set(lens.map((l) => Math.round(l))).size >= 3, 'of uneven lengths: ' + lens.map((l) => l.toFixed(0)));
+    for (let i = 1; i < angles.length; i++) assert.ok((angles[i] - angles[i - 1]) * 30 >= TRIDENT.lane - 1e-6, 'a lane between two bolts where she is');
+    const ahead = { x: p.x + Math.cos(p.h) * p.speed * 1.2, z: p.z + Math.sin(p.h) * p.speed * 1.2 };
+    assert.ok(zs.some((z) => Math.hypot(z.x - ahead.x, z.z - ahead.z) < TRIDENT.gap / 2 + 0.1) && Math.max(...lens) > 30, 'one bolt runs through where she is headed, and past her');
+    s.hp = s.maxHp * 0.4; s.tm.trident = 0;
+    assert.equal(new Set(bossStep(s, DT, { target: p, ships: [s, p], rand }).slams.map((z) => Math.round(Math.atan2(z.z, z.x) * 1e6))).size, TRIDENT.bolts + 1, 'hurt, a fifth bolt');
+  }
+  // reinforcements: once at each threshold, more of them at a higher level
+  {
+    const call = (id, lvl, fr) => { const b = makeBoss(id, lvl, 40, 0, 0), p = makePlayer(0), n = []; for (const f of fr) { b.hp = b.maxHp * f; n.push(bossStep(b, DT, { target: p, ships: [p, b] }).spawn.length, bossStep(b, DT, { target: p, ships: [p, b] }).spawn.length); } return n; };
+    assert.deepEqual(call('trinidad', 1, [0.9, 0.6, 0.3]), [0, 0, 2, 0, 2, 0]);
+    assert.deepEqual(call('junk', 1, [0.9, 0.7, 0.4, 0.2]), [0, 0, 2, 0, 2, 0, 2, 0]);
+    assert.deepEqual(call('junk', 9, [0.7]), [4, 0], 'two more junks per call at level 9');
+  }
+  // Aspidochelone sleeps until she is hit or approached
+  {
+    const b = makeBoss('island', 1, 60, 0, 0), p = makePlayer(0), ctx = { target: p, ships: [p, b] };
+    for (let t = 0; t < 10; t += DT) assert.ok(!bossStep(b, DT, ctx).slams.length && !b.sail, 'asleep, she does nothing');
+    damage(b, 1);
+    assert.equal(bossStep(b, DT, ctx).say, 'THE ISLAND WAKES');
+    const near = makeBoss('island', 1, 20, 0, 0);
+    assert.equal(bossStep(near, DT, { target: p, ships: [p, near] }).say, 'THE ISLAND WAKES', 'a ship close by wakes her');
+  }
+}
+
 // kraken (team 3): slams the nearest ship, player or not; every side's shot hurts it; it can't be boarded
 {
   setMap('waves');
@@ -606,7 +791,7 @@ for (const range of [26, 36, 36 * 1.15 ** 2]) {
   const { FR, t, tn, say, setLang } = await import('./i18n.js');
   const keys = new Set();
   const STR = String.raw`'((?:[^'\\]|\\.)*)'`, un = (k) => k.replace(/\\(.)/g, '$1');
-  for (const f of ['game.js', 'screens.js', 'ui.js', 'index.html']) {
+  for (const f of ['game.js', 'screens.js', 'ui.js', 'index.html', 'bossfight.js']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8');
     for (const m of src.matchAll(new RegExp(String.raw`\bt[k]?\(\s*${STR}`, 'g'))) keys.add(un(m[1]));
     for (const m of src.matchAll(new RegExp(String.raw`\btn\([^,]+,\s*${STR},\s*${STR}`, 'g'))) keys.add(un(m[1])).add(un(m[2]));

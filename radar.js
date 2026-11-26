@@ -108,7 +108,7 @@ export function createRadar(canvas) {
         g.lineTo(C + Math.cos(p.a - 0.13) * (R - 3), C + Math.sin(p.a - 0.13) * (R - 3));
         g.fill();
       } else {
-        const big = s.type === 'kraken' ? 8 : s.type === 'galleon' ? 6 : s.type === 'brig' ? 5 : 4;
+        const big = s.boss ? 9 : s.type === 'kraken' ? 8 : s.type === 'galleon' ? 6 : s.type === 'brig' ? 5 : 4;
         px(p.x, p.y, big + 2, '#1b110b');
         px(p.x, p.y, big, col);
       }

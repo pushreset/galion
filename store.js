@@ -15,7 +15,7 @@ export function rollName(rand = Math.random) {
   for (;;) { const n = pick(PRE, rand) + pick(SUF, rand); if (n.length <= 12) return n; }
 }
 
-export const MODES = ['waves', 'convoy'], SHIPS = ['wasp', 'corsair', 'leviathan'];
+export const MODES = ['waves', 'convoy', 'boss'], SHIPS = ['wasp', 'corsair', 'leviathan'];
 
 // keys: KeyboardEvent.code, a physical position (KeyQ is A on AZERTY, Q on QWERTY)
 export const DEFAULT_KEYS = {
@@ -33,7 +33,7 @@ export function rebind(keys, action, code) {
 export const swapKeys = (keys, action, other) => ({ ...keys, [action]: keys[other], [other]: keys[action] });
 
 // leaderboard: { crew: [{ name, ship }], wave, gold, combo, at }, ranked by wave then gold; solo and crews apart
-export const BOARDS = ['waves', 'convoy', 'waves-crew', 'convoy-crew'];
+export const BOARDS = ['waves', 'convoy', 'waves-crew', 'convoy-crew', 'boss', 'boss-crew']; // boss: solo only for now, its crew board stays empty
 export const boardOf = (mode, crew) => mode + (crew > 1 ? '-crew' : '');
 export const better = (a, b) => b.wave - a.wave || b.gold - a.gold;
 // A row from before names: { ini: 'AAA' | 'AAA+BBB', ship: 'Wasp' | 'Wasp+Corsair', wave, gold, combo, date }.

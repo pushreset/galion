@@ -38,7 +38,7 @@ const head = (x, y, parts, on, title) => `<div class="bs-abs bs-col" style="left
 const key = (k) => `<span class="bs-key">${esc(k)}</span>`;
 const rect = (list, fill) => list.map(([x, y, w, h]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`).join('');
 // mode pictures: 62×25 cells, 5 px each
-const art = (label, body) => () => `<svg width="310" height="125" viewBox="0 0 62 25" shape-rendering="crispEdges" role="img" aria-label="${t(label)}" style="display:block;background:#174478;box-shadow:0 0 0 2px #1b110b">${body}</svg>`;
+const art = (label, body) => () => `<svg width="310" height="125" viewBox="0 0 62 25" shape-rendering="crispEdges" role="img" aria-label="${t(label)}" style="display:block;max-width:100%;height:auto;background:#174478;box-shadow:0 0 0 2px #1b110b">${body}</svg>`;
 const MODE = {
   waves: { name: tk('WAVES'), unit: tk('WAVE'), text: tk('SURVIVE WAVE AFTER WAVE OF THE NAVY. EACH ONE HITS HARDER.'), meta: tk('ENDS WHEN YOU SINK'),
     art: art(tk('Your ship surrounded by rings of enemy ships'), rect([[3, 3, 4, 1], [48, 21, 5, 1]], '#2f87bb') + rect([[52, 6, 3, 1], [8, 20, 4, 1]], '#f4fffb') +
@@ -50,6 +50,12 @@ const MODE = {
       rect([[10, 12, 2, 1], [14, 12, 2, 1], [31, 12, 2, 1], [35, 12, 2, 1], [39, 12, 2, 1], [43, 12, 2, 1], [47, 12, 2, 1]], '#ddcda6') + rect([[19, 11, 2, 2], [23, 11, 2, 2], [27, 11, 2, 2]], '#f5ecd2') +
       rect([[17, 8, 2, 2], [25, 8, 2, 2], [21, 15, 2, 2], [29, 15, 2, 2]], '#d84a38') + rect([[40, 18, 4, 4]], '#1b110b') + rect([[41, 19, 2, 2]], '#ffd24a') +
       rect([[36, 20, 3, 1], [44, 5, 4, 1]], '#f4fffb') + rect([[13, 4, 4, 1]], '#2f87bb')) },
+  // solo only (game.js bossRun). unit: what its score counts
+  boss: { name: 'BOSS', unit: tk('BOSSES BEATEN'), text: tk('TWELVE LEGENDS OF THE SEA, ONE AFTER ANOTHER. POSEIDON COMES LAST.'), meta: tk('SINK ALL TWELVE TO WIN'), solo: true,
+    art: art(tk('A sea serpent rearing over your ship'), rect([[4, 4, 4, 1], [50, 21, 5, 1]], '#2f87bb') + rect([[22, 17, 6, 1], [33, 18, 4, 1], [43, 18, 4, 1], [53, 18, 3, 1], [6, 19, 9, 1]], '#f4fffb') +
+      rect([[24, 7, 3, 10], [34, 12, 2, 6], [40, 12, 2, 6], [44, 13, 2, 5], [50, 13, 2, 5], [54, 15, 2, 3]], '#3b762c') + rect([[19, 5, 8, 3], [36, 10, 4, 2], [46, 11, 4, 2]], '#5f9e38') +
+      rect([[17, 7, 4, 1]], '#a52623') + rect([[21, 5, 1, 1]], '#ffd24a') + rect([[25, 3, 1, 2], [27, 4, 1, 1], [37, 9, 1, 1], [47, 10, 1, 1]], '#94c54c') +
+      rect([[7, 15, 7, 3]], '#1b110b') + rect([[10, 9, 1, 6]], '#3f2616') + rect([[8, 10, 5, 4]], '#2c2c38') + rect([[10, 16, 2, 1]], '#ffd24a')) },
 };
 const STATS = [tk('SPEED'), tk('HANDLING'), tk('HULL'), tk('GUNS'), tk('RELOAD'), tk('CREW')];
 const KEY_ROWS = [[['sailUp'], 'SAIL UP'], [['sailDown'], 'SAIL DOWN'], [['turnLeft'], 'TURN LEFT'], [['turnRight'], 'TURN RIGHT'], [['firePort'], 'FIRE PORT (LEFT)'], [['fireStarboard'], 'FIRE STARBOARD (RIGHT)'],
@@ -132,7 +138,7 @@ export function initScreens(g) {
   // 04 · solo, step 1: a card is chosen by focusing it (arrows, 1 / 2, or the mouse over it)
   screens['solo-mode'] = {
     veil: 0.45, shot: () => ({ wide: true }),
-    hints: [[['←', '→', '1', '2'], 'CHOOSE'], [['ENTER'], 'NEXT'], [['ESC'], 'BACK']],
+    hints: [[['←', '→', '1', '2', '3'], 'CHOOSE'], [['ENTER'], 'NEXT'], [['ESC'], 'BACK']],
     render(el, props) {
       props.sel ??= store.lastMode;
       const best = store.best;
@@ -141,17 +147,17 @@ export function initScreens(g) {
         const badge = store.played && store.lastMode === id ? `<span class="bs-badge">${t('LAST PLAYED')}</span>` : top ? '' : `<span class="bs-badge bs-badge--off">${t('NEW')}</span>`;
         return `<button class="bs-card" data-f="${id}" aria-pressed="${props.sel === id}"${props.sel === id ? ' data-first' : ''}><span class="bs-row" style="justify-content:space-between">${key(i + 1)}${badge}</span>${m.art()}
           <span class="bs-card-name">${t(m.name)}</span><span>${t(m.text)}</span>
-          <span class="bs-row bs-dim" style="gap:16px"><span>${t('SOLO OR CO-OP')}</span><span>${t(m.meta)}</span><span>${t('BEST')} : ${top ? `<span class="bs-gold">${t(m.unit)} ${top.wave}</span>` : t('NOT PLAYED')}</span></span></button>`;
+          <span class="bs-row bs-dim" style="gap:4px 12px;flex-wrap:wrap"><span>${m.solo ? 'SOLO' : t('SOLO OR CO-OP')}</span><span>${t(m.meta)}</span><span>${t('BEST')} : ${top ? `<span class="bs-gold">${t(m.unit)} ${top.wave}</span>` : t('NOT PLAYED')}</span></span></button>`;
       };
       el.innerHTML = `${head(90, 28, ['SOLO', 'MODE', t('SHIP')], 1, t('CHOOSE YOUR WAR'))}
         <div class="bs-abs bs-row bs-dim" style="right:90px;top:60px;gap:6px"><i style="width:28px;height:6px;background:var(--bs-gold)"></i><i style="width:28px;height:6px;background:var(--bs-wood-hi);box-shadow:inset 0 0 0 1px var(--bs-trim)"></i><span style="margin-left:6px">${t('STEP 1 OF 2')}</span></div>
-        <div class="bs-abs" style="left:90px;top:104px;width:780px;display:grid;grid-template-columns:1fr 1fr;gap:32px">${card('waves', 0)}${card('convoy', 1)}</div>
+        <div class="bs-abs" style="left:90px;top:104px;width:780px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px">${card('waves', 0)}${card('convoy', 1)}${card('boss', 2)}</div>
         <div class="bs-abs bs-row" style="left:90px;top:432px;width:780px;justify-content:space-between"><button class="bs-btn" data-f="back">◀ ${t('BACK')}</button><button class="bs-btn bs-btn--primary" data-f="next">${t('NEXT : SHIP')} ▶</button></div>`;
       const pick = (id) => { props.sel = id; for (const c of el.querySelectorAll('.bs-card')) c.setAttribute('aria-pressed', c.dataset.f === id); };
       for (const c of el.querySelectorAll('.bs-card')) c.onfocus = () => pick(c.dataset.f);
       const next = () => { g.setMode(props.sel); ui.open('ship', { mode: props.sel }); };
-      return { acts: { waves: next, convoy: next, next, back: ui.pop }, keys(e) {
-        const id = { Digit1: 'waves', Digit2: 'convoy', Numpad1: 'waves', Numpad2: 'convoy' }[e.code];
+      return { acts: { waves: next, convoy: next, boss: next, next, back: ui.pop }, keys(e) {
+        const id = { Digit1: 'waves', Digit2: 'convoy', Digit3: 'boss', Numpad1: 'waves', Numpad2: 'convoy', Numpad3: 'boss' }[e.code];
         if (id) ui.focus(id);
         return !!id;
       } };
@@ -219,7 +225,7 @@ export function initScreens(g) {
       const ranks = [props.world === null ? '' : props.world < 0 ? t('OFF THE WORLD TOP 100') : t('#{0} WORLD', props.world + 1), props.local < 0 ? '' : t('#{0} THIS BROWSER', props.local + 1)].filter(Boolean).join(' · ');
       const btn = (f, label, first) => `<button class="bs-btn" data-f="${f}"${first ? ' data-first' : ''}${f === 'board' && !screens.leaderboard ? ' disabled' : ''}>${label}</button>`;
       el.innerHTML = `<div class="bs-abs bs-panel bs-col" role="dialog" aria-label="${t('Run over')}" style="left:220px;top:24px;width:520px;padding:16px 28px;gap:12px;align-items:center">
-        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(--bs-red);text-shadow:3px 3px 0 var(--bs-wood-edge)">${t('SUNK')}</h1>
+        <div class="bs-col" style="gap:4px;align-items:center"><h1 style="font-size:56px;line-height:56px;font-weight:700;letter-spacing:4px;color:var(${props.won ? '--bs-gold' : '--bs-red'});text-shadow:3px 3px 0 var(--bs-wood-edge)">${props.won ? t('VICTORY') : t('SUNK')}</h1>
           <span class="bs-dim" style="letter-spacing:1px">${t(m.name)} · ${solo ? `SOLO · ${e.crew[0].ship.toUpperCase()}` : t('CREW OF {0}', e.crew.length)}</span></div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;align-self:stretch">${[[t(m.unit), e.wave, ''], [t('GOLD'), num(e.gold), 'var(--bs-gold)'], [t('BEST COMBO'), '×' + e.combo, 'var(--bs-orange)']].map(([l, v, c]) =>
           `<div class="bs-col" style="padding:8px;background:var(--bs-wood-edge);align-items:center;gap:4px"><span class="bs-dim">${l}</span><span style="font-size:24px;line-height:24px;color:${c}">${v}</span></div>`).join('')}</div>
@@ -363,6 +369,7 @@ export function initScreens(g) {
   // 09 · leaderboard: WAVES / CONVOY, solo runs and crews apart, the world's top 100 or this browser's top 10.
   // props: { mode, crew, local, from }. The focused crew row opens to show its pirates.
   const CHIP = { wasp: 'WSP', corsair: 'COR', leviathan: 'LEV' };
+  const TABS = ['waves', 'convoy', 'boss'];
   screens.leaderboard = {
     veil: 0.6, shot: () => ({ wide: true }),
     hints: [[['←', '→'], 'MODE'], [['TAB'], 'FILTERS'], [['↑', '↓'], 'SCROLL · SELECTED ROW SHOWS THE CREW'], [['Y'], 'JUMP TO YOU'], [['ESC'], 'BACK']],
@@ -370,8 +377,9 @@ export function initScreens(g) {
       props.mode ??= store.lastMode;
       props.world ??= {}; // board → rows | 'fail', read once per visit
       const name = store.name, m = MODE[props.mode], board = boardOf(props.mode, props.crew ? 2 : 1);
+      const local = props.local || !!m.solo; // boss mode: this browser's board only, the world service has none for it
       const yours = (r) => mine(r, name);
-      for (const b of [props.mode, props.mode + '-crew']) if (!props.local && !(b in props.world)) { // both: the footer ranks you on each
+      for (const b of [props.mode, props.mode + '-crew']) if (!local && !(b in props.world)) { // both: the footer ranks you on each
         props.world[b] = null;
         g.world(b).then((rows) => rows, () => 'fail').then((rows) => {
           props.world[b] = rows;
@@ -380,27 +388,27 @@ export function initScreens(g) {
           if (!props.touched) ui.focus(); // nothing pressed yet: land on your row, or the first
         });
       }
-      const lists = props.local ? store.best : props.world; // board → rows
+      const lists = local ? store.best : props.world; // board → rows
       const rows = lists[board];
       const you = Array.isArray(rows) ? rows.findIndex(yours) : -1;
       const best = (b) => { const l = lists[b], i = Array.isArray(l) ? l.findIndex(yours) : -1; return i < 0 ? '–' : `<span class="bs-gold">#${i + 1}</span>`; };
-      const seg = (f, on, label) => `<button data-f="${f}" aria-pressed="${on}">${label}</button>`;
+      const seg = (f, on, label, off) => `<button data-f="${f}" aria-pressed="${on}"${off ? ' disabled' : ''}>${label}</button>`;
       const line = (r, i) => `<div class="bs-lb-item${i === you ? ' is-you' : ''}" tabindex="0" data-f="r${i}"${i === Math.max(you, 0) ? ' data-first' : ''}><div class="bs-lb-row"><span>${i + 1}</span>
         <span class="bs-row" style="gap:8px;min-width:0">${esc(r.crew[0].name)}${r.crew.length > 1 ? `<span class="bs-badge bs-badge--off">+${r.crew.length - 1}</span>` : ''}${i === you ? `<span class="bs-badge bs-badge--you">${r.crew.length > 1 ? t('YOUR CREW') : t('YOU')}</span>` : ''}</span>
         <span class="bs-row" style="gap:4px">${r.crew.map((c) => `<span class="bs-ship-chip bs-ship-chip--${CHIP[c.ship] ? c.ship : 'wasp'}">${CHIP[c.ship] || '?'}</span>`).join('')}</span><span>${+r.wave}</span><span>${num(r.gold)}</span><span>×${+r.combo}</span></div>
         ${r.crew.length > 1 ? `<div class="bs-lb-crew">${r.crew.map((c) => `<span class="bs-row"><span${c.name === name ? ' class="bs-gold"' : ''}>${esc(c.name)}</span><span class="bs-dim">${esc(String(c.ship).toUpperCase())}</span></span>`).join('')}</div>` : ''}</div>`;
       el.innerHTML = `${head(90, 20, [t(props.from || 'MENU'), t('LEADERBOARD')], 1, t('HALL OF INFAMY'))}
         <div class="bs-abs bs-row" style="left:90px;top:84px;width:780px;justify-content:space-between;align-items:flex-end">
-          <div class="bs-tabs" role="tablist" data-group>${['waves', 'convoy'].map((id) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.mode}">${t(MODE[id].name)}</button>`).join('')}</div>
+          <div class="bs-tabs" role="tablist" data-group>${TABS.map((id) => `<button class="bs-tab" role="tab" data-f="t-${id}" aria-selected="${id === props.mode}">${t(MODE[id].name)}</button>`).join('')}</div>
           <div class="bs-row" style="gap:12px;padding-bottom:4px"><div class="bs-seg" data-group aria-label="${t('Crew size')}">${seg('solo', !props.crew, 'SOLO')}${seg('crew', !!props.crew, t('CREW'))}</div>
-            <div class="bs-seg" data-group aria-label="${t('Scope')}">${seg('world', !props.local, t('WORLD'))}${seg('local', !!props.local, t('THIS BROWSER'))}</div></div></div>
+            <div class="bs-seg" data-group aria-label="${t('Scope')}">${seg('world', !local, t('WORLD'), m.solo)}${seg('local', local, t('THIS BROWSER'))}</div></div></div>
         <div class="bs-abs bs-panel bs-col" style="left:90px;top:119px;width:780px;height:368px;padding:12px 16px;gap:2px">
           <div class="bs-lb-row bs-dim" style="font-size:8px;line-height:12px;border-bottom:2px solid var(--bs-wood-edge)"><span>#</span><span>${props.crew ? t('CREW') : t('CAPTAIN')}</span><span>${props.crew ? t('SHIPS') : t('SHIP')}</span><span>${t(m.unit)}</span><span>${t('GOLD')}</span><span>COMBO</span></div>
           <div id="lb-rows" class="bs-col" data-group style="flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;gap:2px">${
             rows === 'fail' ? `<p class="bs-alert" role="alert" style="padding:12px 8px"><b>✕</b> ${t('WORLD BOARD UNREACHABLE. THIS BROWSER STILL HAS YOUR RUNS.')}</p>`
             : !rows ? `<p class="bs-dim" style="padding:12px 8px">◌ ${t('READING THE WORLD BOARD…')}</p>`
             : rows.length ? rows.map(line).join('') : `<p class="bs-dim" style="padding:12px 8px">${props.crew ? t('NO CREW RUN SIGNED YET.') : t('NO SOLO RUN SIGNED YET.')}</p>`}</div>
-          <div class="bs-row bs-dim" style="justify-content:space-between;padding:6px 8px 0;border-top:2px solid var(--bs-wood-edge)"><span>${props.local ? t('THIS BROWSER · TOP 10') : t('WORLD TOP 100')} · ${t('CREW SCORES RANKED APART FROM SOLO')}</span>
+          <div class="bs-row bs-dim" style="justify-content:space-between;padding:6px 8px 0;border-top:2px solid var(--bs-wood-edge)"><span>${local ? t('THIS BROWSER · TOP 10') : t('WORLD TOP 100')} · ${t('CREW SCORES RANKED APART FROM SOLO')}</span>
             <span>${t('YOUR BEST')} · SOLO ${best(props.mode)} · ${t('CREW')} ${best(props.mode + '-crew')}</span></div></div>`;
       const box = el.querySelector('#lb-rows');
       for (const r of box.querySelectorAll('.bs-lb-item')) r.onfocus = () => { // keep the focused row in view (not scrollIntoView: it would scroll the stage too)
@@ -408,11 +416,11 @@ export function initScreens(g) {
         else if (r.offsetTop + r.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = r.offsetTop + r.offsetHeight - box.clientHeight;
       };
       const set = (o, focus) => { Object.assign(props, o, { touched: true }); ui.refresh(); ui.focus(focus); };
-      return { acts: { 't-waves': () => set({ mode: 'waves' }, 't-waves'), 't-convoy': () => set({ mode: 'convoy' }, 't-convoy'),
+      return { acts: { ...Object.fromEntries(TABS.map((id) => ['t-' + id, () => set({ mode: id }, 't-' + id)])),
         solo: () => set({ crew: false }, 'solo'), crew: () => set({ crew: true }, 'crew'), world: () => set({ local: false }, 'world'), local: () => set({ local: true }, 'local') },
         keys(e) {
           props.touched = true;
-          const side = { ArrowLeft: 'waves', ArrowRight: 'convoy' }[e.code];
+          const side = TABS[TABS.indexOf(props.mode) + ({ ArrowLeft: -1, ArrowRight: 1 }[e.code] ?? NaN)]; // the tab next door, if any
           if (side && !document.activeElement?.closest('.bs-seg')) { if (side !== props.mode) set({ mode: side }, document.activeElement?.dataset.f?.startsWith('t-') ? 't-' + side : undefined); return true; }
           if (e.code === 'KeyY' || /^y$/i.test(e.key)) { if (you >= 0) ui.focus('r' + you); return true; }
           return false;

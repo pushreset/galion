@@ -14,7 +14,7 @@ export const TYPES = {
   brig: { len: 10.5, beam: 3.3, hp: 70, speed: 10, turn: 0.85, cannons: 3, range: 30, reloadTime: 4.2, gold: 20, aimTol: 0.16, crew: 24 },
   sloop: { len: 8, beam: 2.6, hp: 40, speed: 12, turn: 1.15, cannons: 2, range: 26, reloadTime: 3.6, gold: 10, aimTol: 0.2, crew: 14 },
   // team 3, allied to nobody: every ship can shoot it and it slams every ship. No guns (range/reload: its tentacles), no crew, no gold.
-  kraken: { len: 10, beam: 8, hp: 400, speed: 3, turn: 0.6, cannons: 0, range: 40, reloadTime: 3, gold: 0, aimTol: 0, crew: 0 },
+  kraken: { len: 10, beam: 8, hp: 400, speed: 3, turn: 0.6, cannons: 0, range: 40, reloadTime: 3, gold: 0, aimTol: 0, crew: 0, noWind: true },
 };
 
 // Island outline: radius wobbles with angle. Shared by mesh (world.js), water shader
@@ -57,6 +57,9 @@ export function setMap(name) {
 // navy (1) and merchants (2) sail together: no friendly fire, no ram damage between them
 const allied = (a, b) => a === b || (a === 1 && b === 2) || (a === 2 && b === 1);
 
+// Flags a ship may carry (bossfight.js sets them; the engine below reads them, it knows no boss by name):
+// noWind: oars or fins, the wind neither helps nor slows. ghost: untouchable (balls, hulls, slams and kegs pass through) and not
+// stopped by islands. fixed: rooted to the seabed, a hull that runs into it takes the whole push. shell: armoured except astern.
 export function makeShip(type, team, x = 0, z = 0, h = 0) {
   const t = TYPES[type];
   return {
@@ -69,7 +72,7 @@ export function makeShip(type, team, x = 0, z = 0, h = 0) {
     regen: 0, calm: 0, crew: t.crew, maxCrew: t.crew, boardCd: 0,
     skills: [], learn: [], cd: {}, ammo: null,
     slowT: 0, burnT: 0, armorT: 0, boostT: 0, smokeT: 0, // status timers (s)
-    alive: true, sinkT: 0,
+    alive: true, sinkT: 0, noWind: !!t.noWind,
   };
 }
 
@@ -103,11 +106,11 @@ export function stepShip(s, dt) {
   s.boardCd = Math.max(0, s.boardCd - dt);
   if (s.burnT > 0) { s.burnT = Math.max(0, s.burnT - dt); damage(s, BURN_DPS * dt, s.burnBy, 'gun'); } // the burn counts for whoever lit it, as her guns' work
   const slow = s.slowT > 0, boost = s.boostT > 0;
-  const target = SAIL_LEVELS[s.sail] * s.maxSpeed * (slow ? 0.45 : 1) * (boost ? 1.7 : s.type === 'kraken' ? 1 : windMul(s.h)); // Full sail (oars out) and the kraken ignore the wind
+  const target = SAIL_LEVELS[s.sail] * s.maxSpeed * (slow ? 0.45 : 1) * (boost ? 1.7 : s.noWind ? 1 : windMul(s.h)); // Full sail (oars out) and the kraken ignore the wind
   const acc = boost ? 5 : target > s.speed ? 1.6 : 2.6; // sails take a while to fill, drag bites faster
   s.speed += Math.sign(target - s.speed) * Math.min(Math.abs(target - s.speed), acc * dt);
   // Rudder needs water flow; keep a small floor so a becalmed ship can still swing.
-  const authority = 0.3 + 0.7 * Math.min(1, s.speed / (0.5 * s.maxSpeed));
+  const authority = 0.3 + 0.7 * Math.min(1, s.speed / (0.5 * s.maxSpeed || 1)); // || 1: a fixed hull has no speed at all
   const want = s.turnIn * s.turn * authority * (slow ? 0.6 : 1) * (boost ? 1.3 : 1);
   s.turnRate += (want - s.turnRate) * Math.min(1, 4 * dt);
   s.h += s.turnRate * dt;
@@ -123,7 +126,7 @@ export function stepShip(s, dt) {
 function collide(s) {
   const rad = s.len * 0.36;
   let hit = 0;
-  for (const isl of ISLANDS) {
+  for (const isl of s.ghost ? [] : ISLANDS) {
     const dx = s.x - isl.x, dz = s.z - isl.z;
     const d = Math.hypot(dx, dz);
     const lim = shoreR(isl, Math.atan2(dz, dx)) + rad;
@@ -144,11 +147,12 @@ function collide(s) {
 }
 
 // --- combat ---------------------------------------------------------------
+export const SHELL = 0.3; // what an armoured hull (s.shell) lets through, except from astern
 export const BALL = { speed: 26, g: 18, y0: 1.3, apex: 3.6, dmg: 9, pb: 8, pbMul: 1.5 }; // pb: point-blank, a hit within pb units of the muzzle deals ×pbMul (about boarding range)
 // Every gun fires the same low arc (looks right, height no longer matters for hits); long guns shoot
 // faster instead of lobbing higher. A 36-range lob used to sail over targets between 11 and 23 units.
 const ARC_VY = Math.sqrt(2 * BALL.g * (BALL.apex - BALL.y0));
-const ARC_T = (ARC_VY + Math.sqrt(ARC_VY ** 2 + 2 * BALL.g * BALL.y0)) / BALL.g;
+export const ARC_T = (ARC_VY + Math.sqrt(ARC_VY ** 2 + 2 * BALL.g * BALL.y0)) / BALL.g;
 
 // Short-handed guns reload slower: half the crew → +40% reload time.
 export const crewMul = (s) => (s.maxCrew ? 1 + 0.8 * (1 - s.crew / s.maxCrew) : 1);
@@ -185,7 +189,7 @@ export function fireBroadside(s, side, rand = Math.random) {
   if (s.ammo) { for (const b of balls) b.ammo = s.ammo; s.ammo = null; } // chain / fire shot armed by a skill
   return balls;
 }
-function makeBall(s, x, z, dx, dz, sp, delay) {
+export function makeBall(s, x, z, dx, dz, sp, delay) {
   return {
     x, y: BALL.y0, z, vx: dx * sp + Math.cos(s.h) * s.speed, vy: ARC_VY, vz: dz * sp + Math.sin(s.h) * s.speed,
     team: s.team, by: s, dmg: BALL.dmg * s.dmgMul, delay, ox: dx, oz: dz, x0: x, z0: z,
@@ -200,13 +204,13 @@ export function stepBall(b, dt, ships) {
   b.z += b.vz * dt;
   // Height is cosmetic: any ball crossing a hull's footprint hits, so nothing ever sails over a ship.
   for (const s of ships) {
-    if (!s.alive || allied(s.team, b.team)) continue;
+    if (!s.alive || s.ghost || allied(s.team, b.team)) continue;
     const dx = b.x - s.x, dz = b.z - s.z, c = Math.cos(s.h), sn = Math.sin(s.h);
     const lx = dx * c + dz * sn, lz = -dx * sn + dz * c;
     if (s.isl ? Math.hypot(dx, dz) < shoreR(s.isl, Math.atan2(dz, dx)) : Math.abs(lx) < s.len / 2 && Math.abs(lz) < s.beam * 0.6) { // a fort: its whole island
       s.lastHit = b.team; // kill credit (PvP)
       const pb = Math.hypot(b.x - b.x0, b.z - b.z0) < BALL.pb; // a fort's ball carries no origin: NaN, never point-blank
-      damage(s, b.dmg * (pb ? BALL.pbMul : 1), b.by, pb ? 'pb' : 'gun');
+      damage(s, b.dmg * (pb ? BALL.pbMul : 1) * (s.shell && lx > -s.len / 6 ? SHELL : 1), b.by, pb ? 'pb' : 'gun'); // shell: only the stern third is soft
       if (b.ammo?.id === 'chain') s.slowT = Math.max(s.slowT, 3 * b.ammo.p);
       if (b.ammo?.id === 'fire') { s.burnT = Math.max(s.burnT, 4 * b.ammo.p); s.burnBy = b.by; }
       return { hit: s, pb };
@@ -230,13 +234,14 @@ export function collideShips(ships) {
   for (let i = 0; i < ships.length; i++) {
     for (let j = i + 1; j < ships.length; j++) {
       const a = ships[i], b = ships[j];
-      if (!a.alive || !b.alive) continue;
+      if (!a.alive || !b.alive || a.ghost || b.ghost) continue;
       const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1e-3;
       const lim = (a.len + b.len) * 0.32;
       if (d >= lim) continue;
       const push = (lim - d) / 2, nx = dx / d, nz = dz / d;
-      a.x -= nx * push; a.z -= nz * push;
-      b.x += nx * push; b.z += nz * push;
+      const ka = a.fixed ? 0 : b.fixed ? 2 : 1, kb = b.fixed ? 0 : a.fixed ? 2 : 1; // a fixed hull does not give way
+      a.x -= nx * push * ka; a.z -= nz * push * ka;
+      b.x += nx * push * kb; b.z += nz * push * kb;
       const va = (Math.cos(a.h) * nx + Math.sin(a.h) * nz) * a.speed, vb = -(Math.cos(b.h) * nx + Math.sin(b.h) * nz) * b.speed; // each hull's own speed into the other
       const closing = va + vb;
       if (closing > 3 && !allied(a.team, b.team)) { // allies just bump
@@ -254,7 +259,7 @@ export function collideShips(ships) {
 }
 
 // --- AI ---------------------------------------------------------------------
-const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+export const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 // Sets s.sail / s.turnIn. Returns the side to fire (+1 starboard, -1 port) or 0.
 export function aiSteer(s, tgt) {
@@ -284,7 +289,7 @@ export function aiSteer(s, tgt) {
 }
 
 // Turn toward heading `want`; a 14-unit look-ahead for islands and the arena edge overrides it.
-function steerTo(s, want) {
+export function steerTo(s, want) {
   // probe along the wanted course (not the bow), so the detour holds until that course is clear
   const blocked = (isl, d) => {
     const ix = s.x + Math.cos(want) * d - isl.x, iz = s.z + Math.sin(want) * d - isl.z;
@@ -381,20 +386,23 @@ export function krakenSteer(s, ships, rand = Math.random) {
 }
 // A tentacle rises (telegraph), then comes down: 'slam' once it hits the water, hurting every ship under it.
 // A fort's mortar shell (fireMortar, sl.team 1) lands the same way, sparing the fort's own side and slowing nobody.
+// sl.wave { r, dmg }: a shock wave round the blow (a whale breaching), full strength at the centre, nothing at r.
 export function stepSlam(sl, dt, ships) {
   if ((sl.t -= dt) > 0) return null;
   const team = sl.team ?? 3;
   for (const s of ships) {
-    if (!s.alive || allied(s.team, team) || Math.hypot(s.x - sl.x, s.z - sl.z) > sl.r + s.len * 0.2) continue;
+    if (!s.alive || s.ghost || allied(s.team, team)) continue;
+    const d = Math.hypot(s.x - sl.x, s.z - sl.z), hit = d <= sl.r + s.len * 0.2, wave = sl.wave && d < sl.wave.r ? sl.wave.dmg * (1 - d / sl.wave.r) : 0;
+    if (!hit && !wave) continue;
     s.lastHit = team; // 3: nobody's kill (PvP)
-    damage(s, sl.dmg);
-    if (team === 3) s.slowT = Math.max(s.slowT || 0, 1.5);
+    damage(s, (hit ? sl.dmg : 0) + wave);
+    if (team === 3 && hit) s.slowT = Math.max(s.slowT || 0, 1.5);
   }
   return 'slam';
 }
 
 // --- boarding ---------------------------------------------------------------------
-export const canBoard = (p, e) => p.alive && e.alive && e.team !== p.team && !e.isPlayer && e.type !== 'fort' && e.type !== 'kraken' && p.boardCd <= 0 &&
+export const canBoard = (p, e) => p.alive && e.alive && e.team !== p.team && !e.isPlayer && e.type !== 'fort' && e.type !== 'kraken' && !e.boss && p.boardCd <= 0 &&
   Math.hypot(e.x - p.x, e.z - p.z) < (p.len + e.len) * 0.4 + 3;
 // Below 20% hull the enemy strikes her colours; otherwise a melee decided round by round (game.js QTE).
 export const startBoarding = (p, e) => (e.hp < 0.2 * e.maxHp ? { auto: true } : { you: p.crew, you0: p.crew, them: e.crew, start: e.crew, round: 0 });
@@ -493,7 +501,7 @@ export const UPGRADES = [
   { id: 'crew', label: 'Recruit: +8 crew', ok: () => true, apply: (s) => { s.maxCrew += 8; s.crew += 8; } },
   { id: 'regen', label: 'Carpenters: faster repair out of combat', ok: (s) => s.regen < 0.05, apply: (s) => (s.regen += 0.012) },
 ];
-const shuffle = (a, rand) => {
+export const shuffle = (a, rand) => {
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
 };
@@ -555,7 +563,7 @@ export function useSkill(s, slot) {
 // Floating mine: 'boom' (damages every enemy in range) when one comes close, 'gone' when it expires.
 export function stepKeg(k, dt, ships) {
   if ((k.life -= dt) <= 0) return 'gone';
-  const near = (s) => s.alive && s.team !== k.team && Math.hypot(s.x - k.x, s.z - k.z) < k.r + s.len * 0.3;
+  const near = (s) => s.alive && !s.ghost && s.team !== k.team && Math.hypot(s.x - k.x, s.z - k.z) < k.r + s.len * 0.3;
   if (!ships.some(near)) return null;
   for (const s of ships.filter(near)) { s.lastHit = k.team; damage(s, k.dmg, k.by, 'keg'); }
   return 'boom';
